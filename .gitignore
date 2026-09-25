@@ -1,0 +1,4 @@
+__tpyc__/
+__pycache__/
+data/
+*.ppm
