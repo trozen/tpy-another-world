@@ -6,8 +6,9 @@ from __future__ import annotations
 from tpy import Own, int32
 
 from .clock import Clock
+from .keyboard import DIR_DOWN, DIR_LEFT, DIR_RIGHT, DIR_UP, Input
 from .music import Music
-from .resource import RT_MUSIC, Resources
+from .resource import GAME_PART_FIRST, GAME_PART_LAST, RT_MUSIC, Resources
 from .screen import Screen
 from .video import Video, s16
 
@@ -17,6 +18,7 @@ NO_REQUEST = 0xFFFF
 KILL_REQUEST = 0xFFFE
 
 VAR_RANDOM_SEED = 0x3C
+VAR_LAST_KEYCHAR = 0xDA
 VAR_HERO_POS_UP_DOWN = 0xE5
 VAR_MUS_MARK = 0xF4
 VAR_SCROLL_Y = 0xF9
@@ -111,15 +113,47 @@ class VM:
                 self.pc[t] = INACTIVE if n == KILL_REQUEST else n
                 self.requested_pc[t] = NO_REQUEST
 
-    def update_input(self) -> None:
+    def update_input(self, inp: Input) -> None:
+        """Hands the keys to the bytecode, once a frame as the original."""
         self.clock.tick()
         self._update_music()
-        self.vars[VAR_HERO_POS_UP_DOWN] = 0
-        self.vars[VAR_HERO_POS_JUMP_DOWN] = 0
-        self.vars[VAR_HERO_POS_LEFT_RIGHT] = 0
-        self.vars[VAR_HERO_POS_MASK] = 0
-        self.vars[VAR_HERO_ACTION] = 0
-        self.vars[VAR_HERO_ACTION_POS_MASK] = 0
+        part = self.res.current_part
+        if part == GAME_PART_LAST:
+            # The password screen reads letters and backspace, upper case.
+            c = inp.last_char
+            if c == 8 or c == 0 or 0x61 <= c <= 0x7A:
+                self.vars[VAR_LAST_KEYCHAR] = c & ~0x20
+                inp.last_char = 0
+        lr = 0
+        ud = 0
+        mask = 0
+        if inp.dir_mask & DIR_RIGHT:
+            lr = 1
+            mask |= 1
+        if inp.dir_mask & DIR_LEFT:
+            lr = -1
+            mask |= 2
+        if inp.dir_mask & DIR_DOWN:
+            ud = 1
+            mask |= 4
+        if inp.dir_mask & DIR_UP:
+            ud = -1
+            mask |= 8
+        self.vars[VAR_HERO_POS_UP_DOWN] = ud
+        self.vars[VAR_HERO_POS_JUMP_DOWN] = ud
+        self.vars[VAR_HERO_POS_LEFT_RIGHT] = lr
+        self.vars[VAR_HERO_POS_MASK] = mask
+        button = 0
+        if inp.button:
+            button = 1
+            mask |= 0x80
+        self.vars[VAR_HERO_ACTION] = button
+        self.vars[VAR_HERO_ACTION_POS_MASK] = mask
+        if inp.code:
+            # The code key opens the password screen from inside the game.
+            inp.code = False
+            if part != GAME_PART_FIRST and part != GAME_PART_LAST:
+                self.res.requested_part = GAME_PART_LAST
 
     def run_frame(self) -> None:
         for t in range(NUM_THREADS):
@@ -258,8 +292,11 @@ class VM:
             case 0x11:  # kill the running thread
                 self.ip = 0xFFFF
                 self.yielded = True
-            case 0x12:  # draw string: text is not rendered yet
-                self.ip += 5
+            case 0x12:  # draw string
+                string_id = self._fetch16()
+                x = self._fetch8()
+                y = self._fetch8()
+                self.video.draw_string(string_id, x, y, self._fetch8())
             case 0x13:  # sub var, var
                 d = self._fetch8()
                 v[d] = s16(v[d] - v[self._fetch8()])

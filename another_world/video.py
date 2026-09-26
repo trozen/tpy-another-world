@@ -8,6 +8,7 @@ from tpy import int32, int64, uint8
 
 from .resource import be16
 from .screen import Screen
+from .text import FONT, string_table
 
 W: Final[int32] = 320
 H: Final[int32] = 200
@@ -44,6 +45,7 @@ class Video:
     npoints: int32
     px: list[int32]
     py: list[int32]
+    strings: dict[int32, str]
 
     def __init__(self) -> None:
         self.mem = bytearray()
@@ -63,6 +65,7 @@ class Video:
         self.npoints = 0
         self.px = [0] * 50
         self.py = [0] * 50
+        self.strings = string_table()
 
     def page_index(self, page: int32) -> int32:
         if page <= 3:
@@ -155,6 +158,48 @@ class Video:
 
     def show(self, screen: Screen, now: int32) -> None:
         screen.present(self.mem, self.front * PAGE_SIZE, self.palette, now)
+
+    # -- text ----------------------------------------------------------------
+
+    def draw_string(self, string_id: int32, x: int32, y: int32, color: int32) -> None:
+        """Draws a string of the table; `x` counts 8-pixel columns."""
+        if string_id not in self.strings:
+            return
+        x0 = x
+        text = self.strings[string_id]
+        for ch in text:
+            if ch == "\n":
+                y += 8
+                x = x0
+                continue
+            self._draw_char(ord(ch), x, y, color)
+            x += 1
+
+    def _draw_char(self, c: int32, x: int32, y: int32, color: int32) -> None:
+        if x > 39 or y > 192:
+            return
+        glyph = (c - 32) * 8
+        base = self.work * PAGE_SIZE + y * W + x * 8
+        for j in range(8):
+            row = int32(FONT[glyph + j])
+            at = base + j * W
+            for _ in range(4):
+                # Two pixels share a byte in the original, so a color above
+                # 15 spills into the left pixel, as in fill_page.
+                b = (int32(self.mem[at]) << 4) | int32(self.mem[at + 1])
+                keep = 0xFF
+                put = 0
+                if row & 0x80:
+                    put |= (color << 4) & 0xFF
+                    keep &= 0x0F
+                if row & 0x40:
+                    put |= color & 0xFF
+                    keep &= 0xF0
+                row <<= 2
+                b = (b & keep) | put
+                self.mem[at] = uint8(b >> 4)
+                self.mem[at + 1] = uint8(b & 0xF)
+                at += 2
 
     # -- polygons ------------------------------------------------------------
 

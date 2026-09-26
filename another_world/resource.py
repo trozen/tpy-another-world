@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from typing import Final
 
 from tpy import Own, int32, uint8, uint32
 
@@ -20,9 +21,9 @@ STATE_LOADED = 1
 STATE_LOAD_ME = 2
 STATE_END_OF_LIST = 0xFF
 
-GAME_PART_FIRST = 16000
-GAME_PART_LAST = 16009
-PART_INTRO = 16001
+GAME_PART_FIRST: Final[int32] = 16000
+GAME_PART_LAST: Final[int32] = 16009
+PART_INTRO: Final[int32] = 16001
 
 # Per game part: the palette, bytecode, cinematic polygons and shared shapes
 # (0 = none) it loads, as MEMLIST indices.
