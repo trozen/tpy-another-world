@@ -8,7 +8,8 @@ from tpy import Own, int32
 from .clock import Clock
 from .keyboard import DIR_DOWN, DIR_LEFT, DIR_RIGHT, DIR_UP, Input
 from .music import Music
-from .resource import GAME_PART_FIRST, GAME_PART_LAST, RT_MUSIC, Resources
+from .releases.memlist import RT_MUSIC
+from .resource import GAME_PART_FIRST, GAME_PART_LAST, PART_INTRO, Resources
 from .screen import Screen
 from .video import Video, s16
 
@@ -79,15 +80,12 @@ class VM:
         self.last_blit = 0
         self.vars[0x54] = 0x81
         self.vars[VAR_RANDOM_SEED] = s16(seed)
-        # Values the copy-protection screen would have left behind.
-        self.vars[0xBC] = 0x10
-        self.vars[0xC6] = 0x80
-        self.vars[0xF2] = 4000
-        self.vars[0xDC] = 33
+        self.res.start_vars(self.vars)
+        self.video.use_strings(self.res.strings())
 
     def init_for_part(self, part: int32) -> None:
         self.music.stop()
-        self.vars[0xE4] = 0x14
+        self.res.part_vars(self.vars)
         self.res.setup_part(part)
         self.code = self.res.segment(0)
         self.palettes = self.res.segment(1)
@@ -139,7 +137,8 @@ class VM:
         if inp.dir_mask & DIR_UP:
             ud = -1
             mask |= 8
-        self.vars[VAR_HERO_POS_UP_DOWN] = ud
+        if self.res.writes_up_down:
+            self.vars[VAR_HERO_POS_UP_DOWN] = ud
         self.vars[VAR_HERO_POS_JUMP_DOWN] = ud
         self.vars[VAR_HERO_POS_LEFT_RIGHT] = lr
         self.vars[VAR_HERO_POS_MASK] = mask
@@ -154,6 +153,9 @@ class VM:
             inp.code = False
             if part != GAME_PART_FIRST and part != GAME_PART_LAST:
                 self.res.requested_part = GAME_PART_LAST
+        if inp.button and part == PART_INTRO and self.res.intro_skip \
+                and self.res.requested_part == 0:
+            self.res.requested_part = PART_INTRO + 1
 
     def run_frame(self) -> None:
         for t in range(NUM_THREADS):

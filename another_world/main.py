@@ -20,32 +20,45 @@ def main() -> int32:
         prog="aw.py", formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Plays Another World in the terminal.\n"
         "\n"
+        "game data:\n"
+        "  You can get the game on GOG: Another World 20th Anniversary\n"
+        "  Edition, which also includes the Amiga version.\n"
+        "\n"
+        "  Point DIR at one of these releases:\n"
+        "  20th Anniversary   the install directory, or its game/ directory\n"
+        "  DOS                the directory with MEMLIST.BIN and BANK01 to BANK0D\n"
+        "  Amiga              the directory with the two .adf floppy images from\n"
+        "                     the unzipped archive, or with the bankNN files on\n"
+        "                     them\n"
+        "\n"
         "keys:\n"
         "  left, right   walk; run with space held\n"
         "  up            jump\n"
         "  down          crouch\n"
-        "  space, enter  action: kick, shoot, or run with an arrow\n"
+        "  space, enter  action: kick, shoot, or run with an arrow; skips the intro\n"
         "  c             the password screen, to start a level by its code\n"
         "  p             pause\n"
-        "  Esc, Ctrl-C   quit\n"
+        "  Ctrl-C        quit\n"
         "\n"
         "terminal:\n"
-        "  The game needs to know how long a key is held, and only terminals with\n"
-        "  the kitty keyboard protocol report key releases: Ghostty, kitty, WezTerm,\n"
-        "  foot and Alacritty. In others, such as GNOME Terminal, a key counts as\n"
-        "  held while it repeats, so a tap lasts about half a second. The terminal\n"
-        "  also needs 24-bit color; the picture is scaled to fit the window.\n"
+        "  For the best experience, run the game in Ghostty with -8.\n"
         "\n"
-        "  The picture is drawn with block characters. The default, -2, works\n"
-        "  with any font. The sharper modes need characters most fonts lack: -6\n"
-        "  needs sextants (Unicode 13) and -8 octants (Unicode 16). Ghostty draws\n"
-        "  these characters itself, so there -8 works and looks best.\n"
+        "  Use a terminal with the kitty keyboard protocol: Ghostty, kitty,\n"
+        "  WezTerm, foot or Alacritty. Only such terminals report key releases,\n"
+        "  and the game needs to know how long a key is held; in others, such as\n"
+        "  GNOME Terminal, a key counts as held while it repeats, so a tap lasts\n"
+        "  about half a second. The terminal also needs 24-bit color; the picture\n"
+        "  is scaled to fit the window.\n"
         "\n"
-        "  For the best experience, run the game in Ghostty with -8.")
-    parser.add_argument("data", help="directory with MEMLIST.BIN and the BANKxx files")
+        "  Use -8 where the terminal can show it, -2 (the default) elsewhere.\n"
+        "  -8 draws 2x4 pixels a cell, the sharpest picture, with octant\n"
+        "  characters (Unicode 16) that most fonts lack; -6 needs sextants\n"
+        "  (Unicode 13). Ghostty draws these characters itself, whatever the\n"
+        "  font; -2 works with any font.")
+    parser.add_argument("data", metavar="DIR", help="the game data (see game data above)")
     parser.add_argument("--part", type=int, default=16001,
-                        help="the game part to start in, from 16000 (the copy protection) "
-                        "to 16009 (the password screen); 16001 is the intro")
+                        help="the game part to start in, from 16000 (the copy protection, "
+                        "DOS and Amiga only) to 16009 (the password screen); 16001 is the intro")
     parser.add_argument("--frames", type=int, default=0, metavar="N",
                         help="stop after N frames; a run that is not in a terminal otherwise "
                         "stops when its first part ends")
@@ -88,7 +101,6 @@ def main() -> int32:
         mode = MODE_DIGESTS
     elif not os.isatty(1):
         mode = MODE_SUMMARY
-    res = Resources(args.data)
     clock = Clock(mode != MODE_TERMINAL)
     render = args.render
     picked = 0 if render == "" else 1
@@ -103,13 +115,24 @@ def main() -> int32:
     if render == "":
         render = "half"
     screen = Screen(mode, int32(RENDER_NAMES.index(render)), int32(args.compare))
-    vm = VM(res, clock, screen, int32(args.seed))
+    try:
+        vm = VM(Resources(args.data), clock, screen, int32(args.seed))
+    except (OSError, ValueError) as e:
+        print(f"aw.py: error: {e}", file=sys.stderr)
+        return 1
+    if part == GAME_PART_FIRST and not vm.res.has_protection:
+        print("aw.py: error: the 20th Anniversary Edition has no copy protection part (16000)",
+              file=sys.stderr)
+        return 2
     keyboard = Keyboard(mode == MODE_TERMINAL)
     inp = Input()
     max_frames = int32(args.frames)
     stop_after_part = mode != MODE_TERMINAL and max_frames == 0
     vm.screen.begin()
     keyboard.begin()
+    # Missing or damaged data can surface at any part start; the message is
+    # printed once the terminal is restored.
+    failure = ""
     try:
         vm.init_for_part(part)
         while not vm.screen.done and not inp.quit:
@@ -130,9 +153,14 @@ def main() -> int32:
                         and current != GAME_PART_LAST:
                     wait_for_unpause(keyboard, inp, vm.clock)
             vm.run_frame()
+    except (OSError, ValueError) as e:
+        failure = str(e)
     finally:
         keyboard.end()
         vm.screen.end()
+    if failure != "":
+        print(f"aw.py: error: {failure}", file=sys.stderr)
+        return 1
     return 0
 
 

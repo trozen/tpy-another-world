@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import Final
 
-from tpy import int32, int64, uint8
+from tpy import Own, int32, int64, uint8
 
-from .resource import be16
+from .binary import be16
 from .screen import Screen
-from .text import FONT, string_table
+from .text import FONT
 
 W: Final[int32] = 320
 H: Final[int32] = 200
@@ -65,7 +65,7 @@ class Video:
         self.npoints = 0
         self.px = [0] * 50
         self.py = [0] * 50
-        self.strings = string_table()
+        self.strings = {}
 
     def page_index(self, page: int32) -> int32:
         if page <= 3:
@@ -118,18 +118,10 @@ class Video:
         for i in range(n):
             self.mem[dst + i] = self.mem[src + i]
 
-    def copy_bitmap(self, src: bytes) -> None:
-        """Loads a background into page 0 from 4 bit planes of 8000 bytes."""
-        for k in range(8000):
-            b0 = int32(src[k])
-            b1 = int32(src[8000 + k])
-            b2 = int32(src[16000 + k])
-            b3 = int32(src[24000 + k])
-            for bit in range(8):
-                shift = 7 - bit
-                v = ((b0 >> shift) & 1) | (((b1 >> shift) & 1) << 1) \
-                    | (((b2 >> shift) & 1) << 2) | (((b3 >> shift) & 1) << 3)
-                self.mem[k * 8 + bit] = uint8(v)
+    def copy_bitmap(self, pixels: bytes) -> None:
+        """Loads a background, one palette index per pixel, into page 0."""
+        for i in range(PAGE_SIZE):
+            self.mem[i] = pixels[i]
 
     def set_palette(self, palettes: bytes, n: int32) -> None:
         if n >= 32:
@@ -160,6 +152,9 @@ class Video:
         screen.present(self.mem, self.front * PAGE_SIZE, self.palette, now)
 
     # -- text ----------------------------------------------------------------
+
+    def use_strings(self, table: Own[dict[int32, str]]) -> None:
+        self.strings = table
 
     def draw_string(self, string_id: int32, x: int32, y: int32, color: int32) -> None:
         """Draws a string of the table; `x` counts 8-pixel columns."""

@@ -223,9 +223,9 @@ class Keyboard:
             if 0x61 <= key <= 0x7A or key == KEY_BACKSPACE:
                 inp.last_char = key
             return
-        if key == KEY_ESCAPE:
-            inp.quit = True
-        elif key == 0x70:  # p
+        # Escape does nothing: it sits next to the keys the game is played
+        # with, and quitting by accident loses the game.
+        if key == 0x70:  # p
             inp.pause = True
         elif key == 0x63:  # c
             inp.code = True

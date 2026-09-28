@@ -1,25 +1,23 @@
-# Game resources: the MEMLIST.BIN directory, the BANKxx files it points into,
-# and the ByteKiller decompressor most entries are packed with.
+# Game resources: which release the data directory holds, the resource
+# list the DOS and Amiga releases share, and the four segments the current
+# game part runs from. What each release does its own way lives in
+# releases/.
 from __future__ import annotations
 
-import os
 from typing import Final
 
-from tpy import Own, int32, uint8, uint32
+from tpy import Own, int32, uint8
 
-# Resource types, as MEMLIST.BIN records them.
-RT_SOUND = 0
-RT_MUSIC = 1
-RT_BITMAP = 2
-RT_PALETTE = 3
-RT_BYTECODE = 4
-RT_POLY_CINEMATIC = 5
-RT_POLY_SHAPES = 6
+from .releases import amiga, anniversary, dos
+from .releases.bytekiller import unpack
+from .releases.files import find_file
+from .releases.memlist import (RT_BITMAP, STATE_LOAD_ME, STATE_LOADED, STATE_NOT_NEEDED,
+                               MemEntry)
+from .text import string_table
 
-STATE_NOT_NEEDED = 0
-STATE_LOADED = 1
-STATE_LOAD_ME = 2
-STATE_END_OF_LIST = 0xFF
+RELEASE_DOS = 0
+RELEASE_AMIGA = 1
+RELEASE_20TH = 2
 
 GAME_PART_FIRST: Final[int32] = 16000
 GAME_PART_LAST: Final[int32] = 16009
@@ -41,145 +39,33 @@ PARTS: list[tuple[int32, int32, int32, int32]] = [
 ]
 
 
-def be16(data: bytes, pos: int32) -> int32:
-    hi = int32(data[pos])
-    lo = int32(data[pos + 1])
-    return (hi << 8) | lo
-
-
-def be32(data: bytes, pos: int32) -> uint32:
-    hi = uint32(be16(data, pos))
-    lo = uint32(be16(data, pos + 2))
-    return (hi << 16) | lo
-
-
-class MemEntry:
-    state: int32
-    kind: int32
-    rank: int32
-    bank: int32
-    offset: int32
-    packed_size: int32
-    size: int32
-
-    def __init__(self, state: int32, kind: int32, rank: int32, bank: int32,
-                 offset: int32, packed_size: int32, size: int32) -> None:
-        self.state = state
-        self.kind = kind
-        self.rank = rank
-        self.bank = bank
-        self.offset = offset
-        self.packed_size = packed_size
-        self.size = size
-
-
-def read_memlist(data_dir: str, entries: list[MemEntry]) -> None:
-    path = os.path.join(data_dir, "MEMLIST.BIN")
-    with open(path, "rb") as f:
-        raw = f.read()
-    pos = 0
-    while int32(raw[pos]) != STATE_END_OF_LIST:
-        entries.append(MemEntry(
-            int32(raw[pos]), int32(raw[pos + 1]), int32(raw[pos + 6]),
-            int32(raw[pos + 7]), int32(be32(raw, pos + 8)),
-            int32(be32(raw, pos + 12)), int32(be32(raw, pos + 16))))
-        pos += 20
-
-
-class _BitReader:
-    """ByteKiller's input: 32-bit words read from the end of the packed data
-    towards its start, each shifted out low bit first. A word's highest set
-    bit is a sentinel marking where its payload ends."""
-
-    data: bytes
-    pos: int32
-    chk: uint32
-    crc: uint32
-
-    def __init__(self, data: bytes, pos: int32) -> None:
-        self.data = data
-        self.pos = pos
-        self.chk = 0
-        self.crc = 0
-
-    def word(self) -> uint32:
-        v = be32(self.data, self.pos)
-        self.pos -= 4
-        return v
-
-    def bit(self) -> int32:
-        b = int32(self.chk & 1)
-        self.chk >>= 1
-        if self.chk == 0:
-            # A fresh word: its top bit is shifted in as 1 so the word runs
-            # dry exactly when its payload does.
-            self.chk = self.word()
-            self.crc ^= self.chk
-            b = int32(self.chk & 1)
-            self.chk = (self.chk >> 1) | 0x80000000
-        return b
-
-    def bits(self, n: int32) -> int32:
-        v = 0
-        for _ in range(n):
-            v = (v << 1) | self.bit()
-        return v
-
-
-def unpack(packed: bytes) -> bytes:
-    """Decompress one ByteKiller stream. The output is written back to front;
-    a back-reference copies from bytes already written above the cursor."""
-    r = _BitReader(packed, len(packed) - 4)
-    size = int32(r.word())
-    out = bytearray(size)
-    r.crc = r.word()
-    r.chk = r.word()
-    r.crc ^= r.chk
-    dst = size - 1
-    remaining = size
-    while remaining > 0:
-        literal_count = 0
-        copy_count = 0
-        copy_bits = 0
-        if r.bit() == 0:
-            if r.bit() == 0:
-                literal_count = r.bits(3) + 1
-            else:
-                copy_count = 2
-                copy_bits = 8
-        else:
-            c = r.bits(2)
-            if c == 3:
-                literal_count = r.bits(8) + 9
-            elif c < 2:
-                copy_count = c + 3
-                copy_bits = c + 9
-            else:
-                copy_count = r.bits(8) + 1
-                copy_bits = 12
-        if literal_count > 0:
-            remaining -= literal_count
-            for _ in range(literal_count):
-                out[dst] = uint8(r.bits(8))
-                dst -= 1
-        else:
-            distance = r.bits(copy_bits)
-            remaining -= copy_count
-            for _ in range(copy_count):
-                out[dst] = out[dst + distance]
-                dst -= 1
-    if r.crc != 0:
-        raise ValueError("ByteKiller checksum mismatch")
+def decode_planar(src: bytes) -> bytes:
+    """A DOS or Amiga background: 4 bit planes of 8000 bytes, the leftmost
+    pixel in the high bit, into one palette index per pixel."""
+    out = bytearray()
+    for k in range(8000):
+        b0 = int32(src[k])
+        b1 = int32(src[8000 + k])
+        b2 = int32(src[16000 + k])
+        b3 = int32(src[24000 + k])
+        for bit in range(8):
+            shift = 7 - bit
+            out.append(uint8(((b0 >> shift) & 1) | (((b1 >> shift) & 1) << 1)
+                             | (((b2 >> shift) & 1) << 2) | (((b3 >> shift) & 1) << 3)))
     return bytes(out)
 
 
-
-
 class Resources:
-    """The loaded state of every MEMLIST entry, and the four segments the
-    current game part runs from."""
+    """The game data of one release: for DOS and Amiga the loaded state of
+    every entry of its resource list, for the 20th Anniversary Edition its
+    files; and the four segments the current game part runs from."""
 
     data_dir: str
+    release: int32
+    # The 20th Anniversary Edition's game directory.
+    nth_root: str
+    # The Amiga floppy images the banks were read from, for error messages.
+    disks: list[str]
     entries: list[MemEntry]
     banks: dict[int32, bytes]
     loaded: dict[int32, bytes]
@@ -189,12 +75,17 @@ class Resources:
     bytecode: bytes
     cinematic: bytes
     shapes: bytes
+    # What the release's game expects of the engine.
+    writes_up_down: bool
+    has_protection: bool
+    intro_skip: bool
 
     def __init__(self, data_dir: str) -> None:
         self.data_dir = data_dir
+        self.release = RELEASE_DOS
         self.entries = []
-        read_memlist(data_dir, self.entries)
         self.banks = {}
+        self.disks = []
         self.loaded = {}
         self.current_part = 0
         self.requested_part = 0
@@ -202,13 +93,74 @@ class Resources:
         self.bytecode = b""
         self.cinematic = b""
         self.shapes = b""
+        self.writes_up_down = True
+        self.has_protection = True
+        self.intro_skip = False
+        self.nth_root = anniversary.find_root(data_dir)
+        memlist = dos.memlist_path(data_dir)
+        if self.nth_root != "":
+            self.release = RELEASE_20TH
+            self.writes_up_down = anniversary.WRITES_UP_DOWN
+            self.has_protection = anniversary.HAS_PROTECTION
+            self.intro_skip = anniversary.INTRO_SKIP
+        elif memlist != "":
+            dos.read_memlist(memlist, self.entries)
+            self.writes_up_down = dos.WRITES_UP_DOWN
+            self.has_protection = dos.HAS_PROTECTION
+            self.intro_skip = dos.INTRO_SKIP
+        elif amiga.has_data(data_dir):
+            self.release = RELEASE_AMIGA
+            amiga.read_disks(data_dir, self.banks, self.disks)
+            if 1 not in self.banks:
+                self.banks[1] = self._read_bank_file(1)
+            amiga.read_entries(data_dir, self.banks[1], self.entries)
+            self.writes_up_down = amiga.WRITES_UP_DOWN
+            self.has_protection = amiga.HAS_PROTECTION
+            self.intro_skip = amiga.INTRO_SKIP
+        else:
+            raise FileNotFoundError(
+                f"{data_dir}: no 20th Anniversary game directory, MEMLIST.BIN, "
+                ".adf disk images or bank01")
+
+    def start_vars(self, v: list[int32]) -> None:
+        """Sets the variables the release's game expects at its start."""
+        if self.release == RELEASE_20TH:
+            anniversary.start_vars(v)
+        elif self.release == RELEASE_AMIGA:
+            amiga.start_vars(v)
+        else:
+            dos.start_vars(v)
+
+    def part_vars(self, v: list[int32]) -> None:
+        """Sets the variables the release's game expects at a part start."""
+        if self.release == RELEASE_20TH:
+            anniversary.part_vars(v)
+        elif self.release == RELEASE_AMIGA:
+            amiga.part_vars(v)
+        else:
+            dos.part_vars(v)
+
+    def strings(self) -> Own[dict[int32, str]]:
+        """The text the bytecode draws, by string id."""
+        if self.release == RELEASE_20TH:
+            return anniversary.read_strings(self.nth_root, "EN")
+        return string_table()
+
+    def _read_bank_file(self, bank: int32) -> bytes:
+        path = find_file(self.data_dir, f"bank{bank:02x}")
+        if path == "":
+            raise FileNotFoundError(
+                f"{self.data_dir}: no bank{bank:02X} {amiga.bank_source(self.disks)}")
+        with open(path, "rb") as f:
+            return f.read()
+
+    def _has_bank(self, bank: int32) -> bool:
+        return bank in self.banks or find_file(self.data_dir, f"bank{bank:02x}") != ""
 
     def read(self, index: int32) -> bytes:
         e = self.entries[index]
         if e.bank not in self.banks:
-            path = os.path.join(self.data_dir, f"BANK{e.bank:02X}")
-            with open(path, "rb") as f:
-                self.banks[e.bank] = f.read()
+            self.banks[e.bank] = self._read_bank_file(e.bank)
         packed = self.banks[e.bank][e.offset:e.offset + e.packed_size]
         if e.packed_size == e.size:
             return packed
@@ -229,12 +181,15 @@ class Resources:
             if best < 0:
                 return bitmaps
             e = self.entries[best]
-            if e.bank == 0:
+            # Only the bank the Amiga release lacks by design is skipped;
+            # any other missing bank is an error when it is read.
+            if e.bank == 0 or (self.release == RELEASE_AMIGA and e.bank == amiga.ABSENT_BANK
+                               and not self._has_bank(e.bank)):
                 e.state = STATE_NOT_NEEDED
                 continue
             data = self.read(best)
             if e.kind == RT_BITMAP:
-                bitmaps.append(data)
+                bitmaps.append(decode_planar(data))
                 e.state = STATE_NOT_NEEDED
             else:
                 self.loaded[best] = data
@@ -244,10 +199,14 @@ class Resources:
         return index < len(self.entries) and self.entries[index].state == STATE_LOADED
 
     def request(self, index: int32) -> Own[list[bytes]]:
-        """Loads one entry, or, for an id past the list, asks for that game
-        part to start at the next frame."""
-        if index > len(self.entries):
+        """Loads one entry, or, for a game part number, asks for that part
+        to start at the next frame. Ids that name nothing are ignored."""
+        if index >= GAME_PART_FIRST:
             self.requested_part = index
+            return []
+        if self.release == RELEASE_20TH:
+            return anniversary.read_bitmap(self.nth_root, index)
+        if index >= len(self.entries):
             return []
         e = self.entries[index]
         if e.state == STATE_NOT_NEEDED:
@@ -281,17 +240,25 @@ class Resources:
         if part < GAME_PART_FIRST or part > GAME_PART_LAST:
             raise ValueError(f"invalid game part {part}")
         pal, code, cine, shapes = PARTS[part - GAME_PART_FIRST]
-        for e in self.entries:
-            e.state = STATE_NOT_NEEDED
-        self.entries[pal].state = STATE_LOAD_ME
-        self.entries[code].state = STATE_LOAD_ME
-        self.entries[cine].state = STATE_LOAD_ME
+        if self.release != RELEASE_20TH:
+            for e in self.entries:
+                e.state = STATE_NOT_NEEDED
+            self.entries[pal].state = STATE_LOAD_ME
+            self.entries[code].state = STATE_LOAD_ME
+            self.entries[cine].state = STATE_LOAD_ME
+            if shapes != 0:
+                self.entries[shapes].state = STATE_LOAD_ME
+            self.load_marked()
+        self.palettes = self._load(pal)
+        self.bytecode = self._load(code)
+        self.cinematic = self._load(cine)
         if shapes != 0:
-            self.entries[shapes].state = STATE_LOAD_ME
-        self.load_marked()
-        self.palettes = self.read(pal)
-        self.bytecode = self.read(code)
-        self.cinematic = self.read(cine)
-        if shapes != 0:
-            self.shapes = self.read(shapes)
+            self.shapes = self._load(shapes)
         self.current_part = part
+
+    def _load(self, index: int32) -> bytes:
+        """One part segment: its own file in the 20th Anniversary Edition,
+        a resource list entry elsewhere."""
+        if self.release == RELEASE_20TH:
+            return anniversary.read_dat(self.nth_root, index)
+        return self.read(index)

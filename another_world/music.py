@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from tpy import int32
 
-from .resource import be16
+from .binary import be16
 from .video import s16
 
 MARK_NOTE = 0xFFFD
