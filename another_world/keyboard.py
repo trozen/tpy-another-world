@@ -229,7 +229,7 @@ class Keyboard:
             inp.pause = True
         elif key == 0x63:  # c
             inp.code = True
-        if 0x61 <= key <= 0x7A or key == KEY_BACKSPACE:
+        if 0x61 <= key <= 0x7A or key == KEY_BACKSPACE or key == KEY_ENTER:
             inp.last_char = key
         elif 0x41 <= key <= 0x5A:
             inp.last_char = key + 0x20

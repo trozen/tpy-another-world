@@ -14,6 +14,7 @@ WRITES_UP_DOWN: Final[bool] = True
 HAS_PROTECTION: Final[bool] = True
 # The DOS intro ends at the action key by itself.
 INTRO_SKIP: Final[bool] = False
+TYPED_CODES: Final[bool] = True
 
 
 def memlist_path(data_dir: str) -> str:

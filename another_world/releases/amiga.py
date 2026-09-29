@@ -19,6 +19,8 @@ WRITES_UP_DOWN: Final[bool] = False
 HAS_PROTECTION: Final[bool] = True
 # The Amiga intro never reads a key; the port gives it the DOS way out.
 INTRO_SKIP: Final[bool] = True
+# Its password screen reads the joystick only, not typed letters.
+TYPED_CODES: Final[bool] = False
 # The release ships without bank05, which holds only the copy protection
 # screen's pictures.
 ABSENT_BANK: Final[int32] = 5

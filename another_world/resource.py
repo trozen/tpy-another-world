@@ -8,6 +8,7 @@ from typing import Final
 
 from tpy import Own, int32, uint8
 
+from .codes import read_code_strings, read_codes, read_letter_labels, relabel
 from .releases import amiga, anniversary, dos
 from .releases.bytekiller import unpack
 from .releases.files import find_file
@@ -79,6 +80,11 @@ class Resources:
     writes_up_down: bool
     has_protection: bool
     intro_skip: bool
+    typed_codes: bool
+    # The letters the password screen shows for those it takes, where they
+    # differ, and the other way round, as lowercase keys.
+    letter_labels: dict[int32, int32]
+    label_keys: dict[int32, int32]
 
     def __init__(self, data_dir: str) -> None:
         self.data_dir = data_dir
@@ -96,6 +102,9 @@ class Resources:
         self.writes_up_down = True
         self.has_protection = True
         self.intro_skip = False
+        self.typed_codes = True
+        self.letter_labels = {}
+        self.label_keys = {}
         self.nth_root = anniversary.find_root(data_dir)
         memlist = dos.memlist_path(data_dir)
         if self.nth_root != "":
@@ -103,11 +112,17 @@ class Resources:
             self.writes_up_down = anniversary.WRITES_UP_DOWN
             self.has_protection = anniversary.HAS_PROTECTION
             self.intro_skip = anniversary.INTRO_SKIP
+            self.typed_codes = anniversary.TYPED_CODES
+            text = anniversary.read_strings(self.nth_root, "EN")
+            self.letter_labels = read_letter_labels(self._part_bytecode(GAME_PART_LAST), text)
+            for taken in self.letter_labels:
+                self.label_keys[self.letter_labels[taken] | 0x20] = taken | 0x20
         elif memlist != "":
             dos.read_memlist(memlist, self.entries)
             self.writes_up_down = dos.WRITES_UP_DOWN
             self.has_protection = dos.HAS_PROTECTION
             self.intro_skip = dos.INTRO_SKIP
+            self.typed_codes = dos.TYPED_CODES
         elif amiga.has_data(data_dir):
             self.release = RELEASE_AMIGA
             amiga.read_disks(data_dir, self.banks, self.disks)
@@ -117,6 +132,7 @@ class Resources:
             self.writes_up_down = amiga.WRITES_UP_DOWN
             self.has_protection = amiga.HAS_PROTECTION
             self.intro_skip = amiga.INTRO_SKIP
+            self.typed_codes = amiga.TYPED_CODES
         else:
             raise FileNotFoundError(
                 f"{data_dir}: no 20th Anniversary game directory, MEMLIST.BIN, "
@@ -143,8 +159,24 @@ class Resources:
     def strings(self) -> Own[dict[int32, str]]:
         """The text the bytecode draws, by string id."""
         if self.release == RELEASE_20TH:
-            return anniversary.read_strings(self.nth_root, "EN")
-        return string_table()
+            table = anniversary.read_strings(self.nth_root, "EN")
+            anniversary.fill_continue_screen(table)
+        else:
+            table = string_table()
+        # The continue screen shows the code of the checkpoint the game
+        # restarts at, as the password screen takes it: the built-in table
+        # has the DOS codes, and the 20th Anniversary Edition's are blank.
+        codes = self.checkpoint_codes()
+        parts: list[int32] = []
+        for name in codes:
+            part = codes[name][0]
+            if part not in parts:
+                parts.append(part)
+        for part in parts:
+            drawn = read_code_strings(self._part_bytecode(part), part, codes)
+            for string_id, name in drawn.items():
+                table[string_id] = name
+        return table
 
     def _read_bank_file(self, bank: int32) -> bytes:
         path = find_file(self.data_dir, f"bank{bank:02x}")
@@ -255,6 +287,28 @@ class Resources:
         if shapes != 0:
             self.shapes = self._load(shapes)
         self.current_part = part
+
+    def checkpoint_codes(self) -> Own[dict[str, tuple[int32, int32]]]:
+        """The password screen's codes, spelled as it shows them, each mapped
+        to (part, checkpoint)."""
+        codes = read_codes(self._part_bytecode(GAME_PART_LAST))
+        if len(self.letter_labels) == 0:
+            return codes
+        shown: dict[str, tuple[int32, int32]] = {}
+        for name in codes:
+            start = codes[name]
+            shown[relabel(name, self.letter_labels)] = (start[0], start[1])
+        return shown
+
+    def taken_key(self, key: int32) -> int32:
+        """The key the password screen takes for a lowercase letter typed,
+        so that a letter types what the screen shows for it."""
+        if key in self.label_keys:
+            return self.label_keys[key]
+        return key
+
+    def _part_bytecode(self, part: int32) -> bytes:
+        return self._load(PARTS[part - GAME_PART_FIRST][1])
 
     def _load(self, index: int32) -> bytes:
         """One part segment: its own file in the 20th Anniversary Edition,

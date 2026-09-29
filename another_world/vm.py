@@ -6,6 +6,7 @@ from __future__ import annotations
 from tpy import Own, int32
 
 from .clock import Clock
+from .codes import condition_holds
 from .keyboard import DIR_DOWN, DIR_LEFT, DIR_RIGHT, DIR_UP, Input
 from .music import Music
 from .releases.memlist import RT_MUSIC
@@ -117,9 +118,11 @@ class VM:
         self._update_music()
         part = self.res.current_part
         if part == GAME_PART_LAST:
-            # The password screen reads letters and backspace, upper case.
-            c = inp.last_char
-            if c == 8 or c == 0 or 0x61 <= c <= 0x7A:
+            # The password screen reads letters and backspace, upper case,
+            # and Enter to check the code. rawgl leaves Enter out, so a code
+            # could only be confirmed from the on-screen grid there.
+            c = self.res.taken_key(inp.last_char)
+            if c == 8 or c == 13 or c == 0 or 0x61 <= c <= 0x7A:
                 self.vars[VAR_LAST_KEYCHAR] = c & ~0x20
                 inp.last_char = 0
         lr = 0
@@ -336,23 +339,7 @@ class VM:
         else:
             a = self._fetch8()
         target = self._fetch16()
-        taken = False
-        match cond & 7:
-            case 0:
-                taken = b == a
-            case 1:
-                taken = b != a
-            case 2:
-                taken = b > a
-            case 3:
-                taken = b >= a
-            case 4:
-                taken = b < a
-            case 5:
-                taken = b <= a
-            case _:  # 6 and 7 are not comparisons; the original never jumps on them
-                pass
-        if taken:
+        if condition_holds(cond, b, a):
             self.ip = target
 
     def _op_reset_threads(self) -> None:

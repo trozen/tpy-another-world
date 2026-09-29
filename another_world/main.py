@@ -9,6 +9,7 @@ from argparse import ArgumentParser
 from tpy import int32
 
 from .clock import Clock
+from .codes import VAR_CHECKPOINT, CodeTyper
 from .keyboard import Input, Keyboard
 from .resource import GAME_PART_FIRST, GAME_PART_LAST, PART_INTRO, Resources
 from .screen import MODE_COMPARE, MODE_DIGESTS, MODE_SUMMARY, MODE_TERMINAL, RENDER_NAMES, Screen
@@ -36,7 +37,8 @@ def main() -> int32:
         "  up            jump\n"
         "  down          crouch\n"
         "  space, enter  action: kick, shoot, or run with an arrow; skips the intro\n"
-        "  c             the password screen, to start a level by its code\n"
+        "  c             the password screen: type a checkpoint code, then enter\n"
+        "                (--code list shows them)\n"
         "  p             pause\n"
         "  Ctrl-C        quit\n"
         "\n"
@@ -59,6 +61,9 @@ def main() -> int32:
     parser.add_argument("--part", type=int, default=16001,
                         help="the game part to start in, from 16000 (the copy protection, "
                         "DOS and Amiga only) to 16009 (the password screen); 16001 is the intro")
+    parser.add_argument("--code", default="", metavar="CODE",
+                        help="start at the checkpoint of this password code, overriding "
+                        "--part; list prints the codes of the release")
     parser.add_argument("--frames", type=int, default=0, metavar="N",
                         help="stop after N frames; a run that is not in a terminal otherwise "
                         "stops when its first part ends")
@@ -124,6 +129,32 @@ def main() -> int32:
         print("aw.py: error: the 20th Anniversary Edition has no copy protection part (16000)",
               file=sys.stderr)
         return 2
+    stop_part = part
+    typer = CodeTyper("")
+    typing = False
+    if args.code != "":
+        # Read once already, for the continue screen, so this cannot fail.
+        codes = vm.res.checkpoint_codes()
+        if args.code == "list":
+            print_codes(codes)
+            return 0
+        name = args.code.upper()
+        if name not in codes:
+            print(f"aw.py: error: {args.code} is not a code of this release; it has "
+                  + ", ".join(sorted(codes)), file=sys.stderr)
+            return 2
+        start = codes[name]
+        stop_part = start[0]
+        if vm.res.typed_codes:
+            # Typed on the password screen, the code leaves the game in the
+            # state a player gets, the screen's own variables included.
+            part = GAME_PART_LAST
+            typer = CodeTyper(name)
+            typing = True
+        else:
+            # What the password screen does when it accepts a code.
+            part = start[0]
+            vm.vars[VAR_CHECKPOINT] = start[1]
     keyboard = Keyboard(mode == MODE_TERMINAL)
     inp = Input()
     max_frames = int32(args.frames)
@@ -139,10 +170,12 @@ def main() -> int32:
             if max_frames > 0 and vm.screen.frames >= max_frames:
                 break
             if stop_after_part and vm.res.requested_part != 0 \
-                    and vm.res.requested_part != part:
+                    and vm.res.requested_part != stop_part:
                 break
             vm.apply_requests()
             keyboard.poll(inp, vm.clock.now())
+            if typing:
+                typer.feed(inp)
             vm.update_input(inp)
             if inp.pause:
                 inp.pause = False
@@ -162,6 +195,30 @@ def main() -> int32:
         print(f"aw.py: error: {failure}", file=sys.stderr)
         return 1
     return 0
+
+
+LEVELS: dict[int32, str] = {16002: "water", 16003: "jail", 16004: "city", 16005: "arena",
+                             16006: "baths", 16007: "final"}
+
+
+def print_codes(codes: dict[str, tuple[int32, int32]]) -> None:
+    """The codes by level, each level's in checkpoint order."""
+    order: list[tuple[int32, int32, str]] = []
+    for name in codes:
+        start = codes[name]
+        order.append((start[0], start[1], name))
+    order.sort()
+    part = int32(0)
+    line: list[str] = []
+    for entry in order:
+        if entry[0] != part:
+            if len(line) > 0:
+                print(" ".join(line))
+            part = entry[0]
+            line = [f"{LEVELS.get(part, '?'):6} ({part})"]
+        line.append(entry[2])
+    if len(line) > 0:
+        print(" ".join(line))
 
 
 def wait_for_unpause(keyboard: Keyboard, inp: Input, clock: Clock) -> None:

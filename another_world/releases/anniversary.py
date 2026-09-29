@@ -16,6 +16,7 @@ from .files import find_file
 WRITES_UP_DOWN: Final[bool] = True
 HAS_PROTECTION: Final[bool] = False
 INTRO_SKIP: Final[bool] = False
+TYPED_CODES: Final[bool] = True
 
 # The 320x200 backgrounds; the other ids the game asks for are its HD
 # pictures (3000 and up) and sound preloads (2000 and up), which the
@@ -153,6 +154,19 @@ def read_strings(root: str, lang: str) -> Own[dict[int32, str]]:
         else:
             table[sid] = FALLBACK_STRINGS[i]
     return table
+
+
+# The continue screen's prompt and its "ACCESS CODE:" label.
+CONTINUE_SCREEN: list[int32] = [0x13D, 0x13C]
+
+
+def fill_continue_screen(table: dict[int32, str]) -> None:
+    """Gives the continue screen's lines, which the edition leaves blank,
+    the built-in text."""
+    for i in range(len(STRING_IDS)):
+        sid = STRING_IDS[i]
+        if sid in CONTINUE_SCREEN and table[sid].strip() == "":
+            table[sid] = FALLBACK_STRINGS[i]
 
 
 def start_vars(v: list[int32]) -> None:

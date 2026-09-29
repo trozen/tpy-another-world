@@ -46,9 +46,9 @@ prints them with all the options.
 | up | jump |
 | down | crouch |
 | space, enter | action: kick, shoot, or run with an arrow; skips the intro |
-| c | the password screen, to start a level by its code |
+| c | the password screen, to start at a checkpoint by its code |
 | p | pause |
-| letters, backspace | type on the password screen |
+| letters, backspace, enter | type a code on the password screen, and check it |
 | Ctrl-C | quit |
 
 ## Terminal
@@ -129,6 +129,7 @@ the game part to start in and `--frames N` stops after N frames.
 | `another_world/releases/bytekiller.py` | the ByteKiller unpacker of the DOS and Amiga banks |
 | `another_world/releases/memlist.py`, `files.py` | resource list entries; case-insensitive file lookup |
 | `another_world/binary.py` | big-endian integers |
+| `another_world/codes.py` | the password screen's checkpoint codes, read from its bytecode, and typing one |
 | `another_world/vm.py` | the 64-thread bytecode VM |
 | `another_world/video.py` | pages, polygon filling, page copy and flip |
 | `another_world/music.py` | the silent music sequencer |
