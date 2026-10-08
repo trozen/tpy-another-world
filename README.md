@@ -17,8 +17,8 @@ them:
 
 - **20th Anniversary Edition** (GOG): the install directory, or its
   `game/` directory. The game runs its original 320x200 pictures and the
-  English text of the edition; the remastered HD pictures, sounds and
-  music are not used.
+  English text of the edition, and its original sound or, with
+  `--remastered-audio`, its remastered one; the HD pictures are not used.
 - **DOS**: the directory with `MEMLIST.BIN` and `BANK01` to `BANK0D`.
 - **Amiga**, which the GOG edition includes as a zip of two floppy images:
   the directory with the two `.adf` files from the unzipped archive, or
@@ -31,12 +31,12 @@ C++ on the first run:
 
 ```bash
 uv tool install tpy-lang   # or: pip install tpy-lang
-tpy aw.py DIR -8           # DIR holds the game data
+tpy aw.py DIR              # DIR holds the game data
 ```
 
-`-8` gives the sharpest picture, but needs a terminal that can show it:
-see [Terminal](#terminal). The keys are below; `tpy aw.py` without arguments
-prints them with all the options.
+In Ghostty the game draws its sharpest picture (`-8`) by default; for other
+terminals see [Terminal](#terminal). The keys are below; `tpy aw.py`
+without arguments prints them with all the options.
 
 ## Keys
 
@@ -47,13 +47,13 @@ prints them with all the options.
 | down | crouch |
 | space, enter | action: kick, shoot, or run with an arrow; skips the intro |
 | c | the password screen, to start at a checkpoint by its code |
-| p | pause |
+| p | pause (the 20th Anniversary Edition's music recordings play on) |
 | letters, backspace, enter | type a code on the password screen, and check it |
-| Ctrl-C | quit |
+| Ctrl-C | quit, printing the code of the checkpoint reached in a level |
 
 ## Terminal
 
-For the best experience, run the game in Ghostty with `-8`.
+For the best experience, run the game in Ghostty.
 
 Use a terminal with the
 [kitty keyboard protocol](https://sw.kovidgoyal.net/kitty/keyboard-protocol/):
@@ -63,87 +63,65 @@ such as GNOME Terminal, a key counts as held while it repeats, so a tap
 lasts about half a second. The terminal also needs 24-bit color; the
 picture is scaled to fit the window.
 
-Use `-8` where the terminal can show it, `-2` (the default) elsewhere. `-8`
-draws 2x4 pixels a cell, the sharpest picture, with octant characters
-(Unicode 16) that most fonts lack; `-6` needs sextants (Unicode 13).
-Ghostty draws these characters itself, whatever the font; `-2` works with
-any font.
+Sound goes to the sound server through `pw-play` (PipeWire), `paplay`
+(PulseAudio) or `aplay` (ALSA), the first of them that works.
+
+Use `-8` where the terminal can show it: it draws 2x4 pixels a cell, the
+sharpest picture, with octant characters (Unicode 16) that most fonts lack;
+`-6` needs sextants (Unicode 13). Ghostty draws these characters itself,
+whatever the font. Without an option, the game uses `-8` in Ghostty, which
+it detects, and `-2`, which works with any font, elsewhere.
 
 ## Render modes
 
 The image is scaled to fit the terminal and centered. The mode picks how
 many pixels one terminal cell shows: `-2`, `-4`, `-6` and `-8` by that count,
-or `-r` (`--render`) by name.
+or `-r` (`--render`) by name. Without one, the game uses `-8` in Ghostty,
+which it detects, and `-2` elsewhere.
 
 | Option | Pixels per cell | Notes |
 |---|---|---|
-| `-2`, `-r half` (default) | 1x2 | half blocks; every cell exact |
+| `-2`, `-r half` | 1x2 | half blocks; every cell exact; the default outside Ghostty |
 | `-4`, `-r quad` | 2x2 | quadrants |
 | `-6`, `-r sextant` | 2x3 | needs sextants (Unicode 13) in the font, or Ghostty |
-| `-8`, `-r octant` | 2x4 | needs octants (Unicode 16) in the font, or Ghostty |
+| `-8`, `-r octant` | 2x4 | needs octants (Unicode 16) in the font, or Ghostty; the default in Ghostty |
 | `-r braille` | 2x4 | dots; one-color cells are drawn solid |
 
 A cell shows two colors; a cell with more gets the pair that represents its
 pixels best. The frame is first reduced to the grid the terminal fits,
 keeping the most common color of each block of pixels.
 
-## Headless runs
+## Ideas
 
-When the output is not a terminal, or with `--digests`, the game runs on a
-virtual clock: 1 ms per engine frame, plus every pause the bytecode asks for.
-That makes a run instant and repeatable. `tpy aw.py DIR | cat` prints the
-frame count and a digest, `--digests` one digest per frame; `--part` picks
-the game part to start in and `--frames N` stops after N frames.
+- A smooth mode. The game runs at about 10 frames a second, and its
+  animation is hand-drawn key poses. Frames in between could glide moved
+  shapes and morph one pose into the next, shown during the wait the
+  original already has before each frame, so they would add no delay. Going
+  further, the scripts could run at 30 steps a second, every third step
+  kept equal to the original's.
+- Save states.
+- A search of the bytecode for code and text the game never reaches.
 
-## Status
+How the engine is checked, its headless runs and its source layout:
+[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
-- Frames without input are identical to the reference interpreter's under
-  the same virtual clock, pixels and palette: the first 20000 from the intro
-  on, and the first 3000 from each of several start parts. For the Amiga
-  release the reference was given the same resource list and start values;
-  for the 20th Anniversary Edition the reference is rawgl, with its own
-  rendering changes turned off (palette fix-ups, sprite masks, and its
-  polygon scan start and one-pixel shapes, which differ from the original
-  engine).
-- French Amiga data is recognized, but its text is drawn in English.
-- The font, and for DOS and Amiga the string table, come from the DOS
-  executable, which the data files do not include; `another_world/text.py`
-  carries them. The 20th Anniversary Edition's strings are read from its
-  `TXT/` files.
-- Not implemented: sound and music playback (the music sequencer runs
-  silently, only for the timing marks the bytecode waits on), and saving.
+## Sources
 
-## Layout
-
-| File | What |
-|---|---|
-| `aw.py` | entry point |
-| `another_world/main.py` | command line and the engine loop |
-| `another_world/resource.py` | release detection, the resource list DOS and Amiga share, per-part loading |
-| `another_world/releases/dos.py` | MEMLIST.BIN and the DOS start values |
-| `another_world/releases/amiga.py` | the Amiga banks, resource list and start values |
-| `another_world/releases/anniversary.py` | the 20th Anniversary files (DAT, BMP backgrounds, TXT strings) and start values |
-| `another_world/releases/adf.py` | files on Amiga floppy images |
-| `another_world/releases/amiga_memlist.py` | the Amiga release's resource list, from rawgl |
-| `another_world/releases/anniversary_strings.py` | the 20th Anniversary string ids and fallback strings, from rawgl |
-| `another_world/releases/bytekiller.py` | the ByteKiller unpacker of the DOS and Amiga banks |
-| `another_world/releases/memlist.py`, `files.py` | resource list entries; case-insensitive file lookup |
-| `another_world/binary.py` | big-endian integers |
-| `another_world/codes.py` | the password screen's checkpoint codes, read from its bytecode, and typing one |
-| `another_world/vm.py` | the 64-thread bytecode VM |
-| `another_world/video.py` | pages, polygon filling, page copy and flip |
-| `another_world/music.py` | the silent music sequencer |
-| `another_world/keyboard.py` | raw terminal input, held keys |
-| `another_world/text.py` | the font and the English strings |
-| `another_world/clock.py` | wall or virtual game clock |
-| `another_world/screen.py` | terminal output and frame digests |
-| `another_world/glyphs.py` | the glyph for every pixel pattern of each cell layout |
+- [Another-World-Bytecode-Interpreter](https://github.com/fabiensanglard/Another-World-Bytecode-Interpreter)
+  by Fabien Sanglard, the interpreter this engine is ported from, and the
+  reference its DOS and Amiga frames are checked against. His
+  ["Another World" source code review](https://fabiensanglard.net/anotherWorld_code_review/)
+  walks through how it works.
+- Gregory Montoir's `raw`, the reverse engineering of the DOS executable
+  that Sanglard's interpreter is based on.
+- [rawgl](https://github.com/cyxx/rawgl), Montoir's later engine: the
+  Amiga release's resource list and start values, the 20th Anniversary
+  Edition's files, string ids and fallback strings, how sound and music
+  are played, and the reference for the 20th Anniversary Edition's frames.
+- Eric Chahi's [official Another World site](https://www.anotherworld.fr/anotherworld_uk/another_world.htm),
+  on how he made the game.
 
 ## License
 
-GPL-2.0, see `LICENSE`. This is a port of Fabien Sanglard's
-[Another-World-Bytecode-Interpreter](https://github.com/fabiensanglard/Another-World-Bytecode-Interpreter),
-itself based on Gregory Montoir's `raw`, both under the GPL. The Amiga
-resource list and start values come from Montoir's
-[rawgl](https://github.com/cyxx/rawgl).
-Another World is by Eric Chahi.
+GPL-2.0, see `LICENSE`, as the engines it is ported from. Another World is
+by Eric Chahi.

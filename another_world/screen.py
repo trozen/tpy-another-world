@@ -346,9 +346,13 @@ class Screen:
         self.kept = bytearray()
         self.kept_palette = [0] * 16
 
+    def set_render(self, render: int32) -> None:
+        self.cells = Cells(render)
+
     def begin(self) -> None:
         if self.mode == MODE_TERMINAL:
-            sys.stdout.write("\x1b[?25l\x1b[2J")
+            # The alternate screen, so the shell's screen comes back on exit.
+            sys.stdout.write("\x1b[?1049h\x1b[?25l\x1b[2J")
 
     def present(self, pixels: bytearray, base: int32, palette: list[int32],
                 now: int32) -> None:
@@ -375,7 +379,7 @@ class Screen:
 
     def end(self) -> None:
         if self.mode == MODE_TERMINAL:
-            sys.stdout.write(f"\x1b[0m\x1b[{self.cells.top + self.cells.rows + 1};1H\x1b[?25h")
+            sys.stdout.write("\x1b[0m\x1b[?25h\x1b[?1049l")
             sys.stdout.flush()
         elif self.mode == MODE_SUMMARY:
             print(f"{self.frames} frames, digest {self.digest:08x}")

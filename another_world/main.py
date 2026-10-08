@@ -4,16 +4,21 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import time
 from argparse import ArgumentParser
 
 from tpy import int32
 
+from .audio import AudioOut
 from .clock import Clock
-from .codes import VAR_CHECKPOINT, CodeTyper
+from .codes import VAR_CHECKPOINT, CodeTyper, continue_screen_string
 from .keyboard import Input, Keyboard
-from .resource import GAME_PART_FIRST, GAME_PART_LAST, PART_INTRO, Resources
-from .screen import MODE_COMPARE, MODE_DIGESTS, MODE_SUMMARY, MODE_TERMINAL, RENDER_NAMES, Screen
+from .resource import GAME_PART_FIRST, GAME_PART_LAST, PART_INTRO, RELEASE_20TH, Resources
+from .screen import (H, MODE_COMPARE, MODE_DIGESTS, MODE_SUMMARY, MODE_TERMINAL, RENDER_NAMES,
+                     RENDER_OCTANT, W, Cells, Screen)
+from .sound import RATE
 from .vm import VM
+from .wav import WavWriter
 
 
 def main() -> int32:
@@ -43,7 +48,7 @@ def main() -> int32:
         "  Ctrl-C        quit\n"
         "\n"
         "terminal:\n"
-        "  For the best experience, run the game in Ghostty with -8.\n"
+        "  For the best experience, run the game in Ghostty.\n"
         "\n"
         "  Use a terminal with the kitty keyboard protocol: Ghostty, kitty,\n"
         "  WezTerm, foot or Alacritty. Only such terminals report key releases,\n"
@@ -52,11 +57,11 @@ def main() -> int32:
         "  about half a second. The terminal also needs 24-bit color; the picture\n"
         "  is scaled to fit the window.\n"
         "\n"
-        "  Use -8 where the terminal can show it, -2 (the default) elsewhere.\n"
-        "  -8 draws 2x4 pixels a cell, the sharpest picture, with octant\n"
-        "  characters (Unicode 16) that most fonts lack; -6 needs sextants\n"
-        "  (Unicode 13). Ghostty draws these characters itself, whatever the\n"
-        "  font; -2 works with any font.")
+        "  Use -8 where the terminal can show it: it draws 2x4 pixels a cell, the\n"
+        "  sharpest picture, with octant characters (Unicode 16) that most fonts\n"
+        "  lack; -6 needs sextants (Unicode 13). Ghostty draws these characters\n"
+        "  itself, whatever the font, and gets -8 by default; elsewhere the\n"
+        "  default is -2, which works with any font.")
     parser.add_argument("data", metavar="DIR", help="the game data (see game data above)")
     parser.add_argument("--part", type=int, default=16001,
                         help="the game part to start in, from 16000 (the copy protection, "
@@ -70,13 +75,13 @@ def main() -> int32:
     parser.add_argument("--digests", action="store_true",
                         help="print a digest of every frame instead of drawing")
     parser.add_argument("-2", dest="half", action="store_true",
-                        help="half blocks, 1x2 pixels a cell (the default)")
+                        help="half blocks, 1x2 pixels a cell (the default outside Ghostty)")
     parser.add_argument("-4", dest="quad", action="store_true",
                         help="quadrants, 2x2 pixels a cell")
     parser.add_argument("-6", dest="sextant", action="store_true",
                         help="sextants, 2x3 pixels a cell")
     parser.add_argument("-8", dest="octant", action="store_true",
-                        help="octants, 2x4 pixels a cell: the sharpest")
+                        help="octants, 2x4 pixels a cell: the sharpest (the default in Ghostty)")
     parser.add_argument("-r", "--render", default="",
                         choices=["half", "quad", "sextant", "octant", "braille"],
                         metavar="MODE",
@@ -84,6 +89,13 @@ def main() -> int32:
                         "-2 to -8) or braille (2x4 dots)")
     parser.add_argument("--compare", type=int, default=-1, metavar="FRAME",
                         help="print frame FRAME once with every --render option, then quit")
+    parser.add_argument("--remastered-audio", action="store_true",
+                        help="the 20th Anniversary Edition's remastered sound and ambient "
+                        "music instead of the original's")
+    parser.add_argument("--mute", action="store_true",
+                        help="play no sound (sound needs pw-play, paplay or aplay)")
+    parser.add_argument("--wav", default="", metavar="FILE",
+                        help="write the game's sound and music to FILE as WAV")
     parser.add_argument("--seed", type=int, default=0, help="the game's random seed")
     # A bare run shows the help, like --help.
     argv: list[str] = []
@@ -117,7 +129,9 @@ def main() -> int32:
     if picked > 1:
         print("aw.py: error: choose one of -2, -4, -6, -8 and -r", file=sys.stderr)
         return 2
-    if render == "":
+    # The terminal's answers decide the default once it is opened.
+    defaulted = render == ""
+    if defaulted:
         render = "half"
     screen = Screen(mode, int32(RENDER_NAMES.index(render)), int32(args.compare))
     try:
@@ -125,6 +139,12 @@ def main() -> int32:
     except (OSError, ValueError) as e:
         print(f"aw.py: error: {e}", file=sys.stderr)
         return 1
+    if args.remastered_audio:
+        if vm.res.release != RELEASE_20TH:
+            print("aw.py: error: --remastered-audio needs the 20th Anniversary Edition",
+                  file=sys.stderr)
+            return 2
+        vm.res.remastered_audio = True
     if part == GAME_PART_FIRST and not vm.res.has_protection:
         print("aw.py: error: the 20th Anniversary Edition has no copy protection part (16000)",
               file=sys.stderr)
@@ -155,16 +175,33 @@ def main() -> int32:
             # What the password screen does when it accepts a code.
             part = start[0]
             vm.vars[VAR_CHECKPOINT] = start[1]
+    wav: WavWriter | None = None
+    if args.wav != "":
+        try:
+            wav = WavWriter(args.wav, RATE)
+        except OSError as e:
+            print(f"aw.py: error: {args.wav}: {e.strerror}", file=sys.stderr)
+            return 1
+        vm.mixer.enabled = True
+    audio: AudioOut | None = None
+    if mode == MODE_TERMINAL and not args.mute:
+        audio = AudioOut()
+        if audio.active():
+            vm.mixer.enabled = True
     keyboard = Keyboard(mode == MODE_TERMINAL)
     inp = Input()
     max_frames = int32(args.frames)
     stop_after_part = mode != MODE_TERMINAL and max_frames == 0
-    vm.screen.begin()
-    keyboard.begin()
     # Missing or damaged data can surface at any part start; the message is
     # printed once the terminal is restored.
     failure = ""
     try:
+        vm.screen.begin()
+        keyboard.begin()
+        if mode == MODE_TERMINAL:
+            wait_for_answers(keyboard, inp, vm.clock)
+            if defaulted and terminal_name(keyboard) in OCTANT_TERMINALS:
+                vm.screen.set_render(RENDER_OCTANT)
         vm.init_for_part(part)
         while not vm.screen.done and not inp.quit:
             if max_frames > 0 and vm.screen.frames >= max_frames:
@@ -185,16 +222,160 @@ def main() -> int32:
                 if current != GAME_PART_FIRST and current != PART_INTRO \
                         and current != GAME_PART_LAST:
                     wait_for_unpause(keyboard, inp, vm.clock)
+                    if audio is not None:
+                        audio.resume()
             vm.run_frame()
+            samples = vm.mixer.take()
+            if wav is not None:
+                wav.write(samples)
+            if audio is not None:
+                audio.write(samples)
+                if vm.mixer.track_changed:
+                    vm.mixer.track_changed = False
+                    audio.play_track(vm.mixer.track, vm.mixer.track_loop)
+                audio.keep_track()
     except (OSError, ValueError) as e:
         failure = str(e)
+    except KeyboardInterrupt:
+        # A SIGINT from outside the game quits it like Ctrl-C does.
+        pass
     finally:
-        keyboard.end()
-        vm.screen.end()
+        # Each runs even if one before fails, so no player is left playing.
+        try:
+            keyboard.end()
+        finally:
+            try:
+                vm.screen.end()
+            finally:
+                try:
+                    if wav is not None:
+                        wav.close()
+                finally:
+                    if audio is not None:
+                        audio.close()
     if failure != "":
         print(f"aw.py: error: {failure}", file=sys.stderr)
         return 1
+    if mode == MODE_TERMINAL:
+        print(vm.video.string(CLOSING_STRING).strip())
+        print()
+        print("Thanks for playing Another World. If you liked it, get it on GOG.")
+        name = checkpoint_code(vm)
+        level = LEVELS.get(vm.res.current_part, "")
+        if name != "" and level != "":
+            print()
+            print(f"Checkpoint code: {name} ({level}); start there with --code {name}")
+        if keyboard.enabled:
+            # The name again: a reply too late for the render mode still counts.
+            tip = terminal_tip(keyboard.kitty, terminal_name(keyboard), defaulted, vm.screen)
+            if tip != "":
+                print()
+                print(tip)
     return 0
+
+
+# The terminals that draw the octants of -8 themselves, whatever the font.
+OCTANT_TERMINALS = ["ghostty"]
+# Terminal multiplexers, which answer XTVERSION for the terminal they run in.
+MULTIPLEXERS = ["tmux", "screen"]
+
+RENDER_OPTIONS: dict[str, str] = {"half": "-2", "quad": "-4", "sextant": "-6", "octant": "-8",
+                                  "braille": "-r braille"}
+
+
+def wait_for_answers(keyboard: Keyboard, inp: Input, clock: Clock) -> None:
+    """Waits for the terminal to answer keyboard.begin(), since the default
+    render mode depends on it; keys typed meanwhile are read as usual. A
+    terminal that answers nothing is given up on soon. A quit waits too, so
+    the answers are not left for the shell to echo."""
+    give_up = time.monotonic() + 0.3
+    while keyboard.enabled:
+        keyboard.poll(inp, clock.now())
+        if keyboard.answered or time.monotonic() >= give_up:
+            return
+        time.sleep(0.005)
+
+
+def terminal_name(keyboard: Keyboard) -> str:
+    if keyboard.terminal != "":
+        return keyboard.terminal
+    # Without a reply, Ghostty is told by its own TERM: TERM_PROGRAM is
+    # inherited by any terminal started from a Ghostty shell.
+    if os.environ.get("TERM") == "xterm-ghostty":
+        return "ghostty"
+    return ""
+
+
+def terminal_tip(kitty: bool, terminal: str, defaulted: bool, screen: Screen) -> str:
+    """A tip for a better game, when the terminal or its window held this
+    one back; "" when nothing did."""
+    cells = screen.cells
+    render = RENDER_NAMES[cells.render]
+    ghostty = terminal == "ghostty"
+    option = RENDER_OPTIONS[render]
+    width = cells.cols * cells.cw
+    height = cells.rows * cells.ch
+    # The most this mode shows, in a window of any size.
+    full = Cells(cells.render)
+    full.fit(W, H)
+    full_width = full.cols * full.cw
+    full_height = full.rows * full.ch
+    drawn = cells.cols > 0
+    lower = drawn and defaulted and render != "octant" and (width < W or height < H)
+    small = drawn and not lower and (width < full_width or height < full_height)
+    text = ""
+    if not kitty:
+        text = "This terminal does not report key releases, so a tap counts as held " \
+            "for about half a second"
+    if lower:
+        text += ", and showed" if text != "" else "This terminal showed"
+        text += f" the picture with {option} at {width}x{height}"
+    elif small:
+        text += ", and the window" if text != "" else "The window"
+        text += f" was too small for the full {full_width}x{full_height} picture with " \
+            f"{option}, which needs {full.cols} columns by {full.rows} rows"
+    if text == "":
+        return ""
+    text += "."
+    lines: list[str] = []
+    line = ""
+    for word in text.split(" "):
+        if line == "":
+            line = word
+        elif len(line) + 1 + len(word) > 72:
+            lines.append(line)
+            line = word
+        else:
+            line += " " + word
+    lines.append(line)
+    if terminal in MULTIPLEXERS:
+        # It answers for itself, so the terminal behind it is unknown.
+        lines.append(f"Inside {terminal} the game cannot tell the terminal; in Ghostty, use -8.")
+    elif not ghostty:
+        lines.append("For the best experience, play in Ghostty.")
+    return "\n".join(lines)
+
+
+# The line the game ends with.
+CLOSING_STRING = 0x265
+
+
+def checkpoint_code(vm: VM) -> str:
+    """The code of the checkpoint the game was at: the one the continue
+    screen would show, or where the part has none for it, the part's code
+    of the latest checkpoint reached; "" for none."""
+    checkpoint = vm.vars[VAR_CHECKPOINT]
+    name = vm.video.string(continue_screen_string(vm.code, checkpoint))
+    if name != "":
+        return name
+    best = -1
+    codes = vm.res.checkpoint_codes()
+    for code in codes:
+        start = codes[code]
+        if start[0] == vm.res.current_part and best < start[1] <= checkpoint:
+            best = start[1]
+            name = code
+    return name
 
 
 LEVELS: dict[int32, str] = {16002: "water", 16003: "jail", 16004: "city", 16005: "arena",
@@ -222,7 +403,9 @@ def print_codes(codes: dict[str, tuple[int32, int32]]) -> None:
 
 
 def wait_for_unpause(keyboard: Keyboard, inp: Input, clock: Clock) -> None:
+    clock.pause()
     while not inp.pause and not inp.quit:
-        clock.sleep(50)
+        time.sleep(0.05)
         keyboard.poll(inp, clock.now())
     inp.pause = False
+    clock.resume()

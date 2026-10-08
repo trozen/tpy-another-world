@@ -115,10 +115,10 @@ class Disk:
                     for i in range(n):
                         out.append(self.image[data + i])
                 else:
-                    n = _be32(self.image, data + 12)
-                    if n > OFS_DATA:
+                    length = _be32(self.image, data + 12)
+                    if length > OFS_DATA:
                         raise self._corrupt()
-                    for i in range(int32(n)):
+                    for i in range(int32(length)):
                         out.append(self.image[data + 24 + i])
             header = self._block(header + BLOCK - 8)
             if header == 0:

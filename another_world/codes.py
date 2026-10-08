@@ -103,6 +103,15 @@ def read_code_strings(code: bytes, part: int32,
     return found
 
 
+def continue_screen_string(code: bytes, checkpoint: int32) -> int32:
+    """The string the continue screen in `code` shows the code with, for
+    var 0x00 at `checkpoint`; -1 if the part has no continue screen."""
+    for at in range(len(code) - 12):
+        if _draws(code, at, STRING_PRESS_BUTTON) and _draws(code, at + 6, STRING_ACCESS_CODE):
+            return _code_string(code, at + 12, checkpoint)
+    return -1
+
+
 def read_letter_labels(code: bytes, strings: dict[int32, str]) -> Own[dict[int32, int32]]:
     """The letter the password screen in `code` shows for each letter it
     takes, where the two differ, as upper-case code points."""

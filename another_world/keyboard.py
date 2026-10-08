@@ -41,6 +41,8 @@ HELD = 0x7FFFFFFF
 # Kitty flags: disambiguate escapes (1), report releases (2), and report
 # every key as an escape code (8), so letters and space get releases too.
 KITTY_FLAGS = 11
+# The longest XTVERSION reply taken; anything longer is not one.
+MAX_REPLY = 64
 
 
 class Input:
@@ -68,6 +70,10 @@ class Keyboard:
     # apply to stdout, which shares its open file, and cut frames short.
     fd: int64
     kitty: bool
+    # The device attributes reply came, so every answer before it is in.
+    answered: bool
+    # The terminal's name from its XTVERSION reply, lower case; "" for none.
+    terminal: str
     saved: "termios.TermAttributes | None"
     pending: bytearray
     # Held keys and the time each stops counting as held.
@@ -77,6 +83,8 @@ class Keyboard:
         self.enabled = enabled and os.isatty(0)
         self.fd = -1
         self.kitty = False
+        self.answered = False
+        self.terminal = ""
         self.pending = bytearray()
         self.held_until = {}
         self.saved = None
@@ -89,13 +97,15 @@ class Keyboard:
         self.fd = os.open("/dev/tty", os.O_RDONLY)
         self.saved = tty.setraw(self.fd)
         os.set_blocking(self.fd, False)
-        # Asks for the kitty flags, then for the device attributes, which
-        # every terminal answers: a flags reply before it means support.
-        sys.stdout.write("\x1b[?u\x1b[c")
+        # Asks for the terminal's name (XTVERSION) and the kitty flags, then
+        # for the device attributes, which every terminal answers: a reply
+        # to the others comes before it or not at all.
+        sys.stdout.write("\x1b[>q\x1b[?u\x1b[c")
         sys.stdout.flush()
 
     def end(self) -> None:
-        if not self.enabled:
+        # Also after a begin() that failed before the terminal was opened.
+        if not self.enabled or self.fd < 0:
             return
         if self.kitty:
             sys.stdout.write("\x1b[<u")
@@ -104,6 +114,7 @@ class Keyboard:
         if saved is not None:
             termios.tcsetattr(self.fd, termios.TCSAFLUSH, saved)
         os.close(self.fd)
+        self.fd = -1
 
     def poll(self, inp: Input, now: int32) -> None:
         """Reads the keys that arrived since the last call into `inp`."""
@@ -157,6 +168,19 @@ class Keyboard:
                 self._arrow(inp, now, int32(self.pending[i + 2]), 0, EVENT_PRESS)
                 i += 3
                 continue
+            # DCS: the XTVERSION reply, ESC P > | name ST. Replies come before
+            # the device attributes one, so after it ESC P is a key again.
+            if intro == 0x50 and not self.answered:
+                if i + 2 >= n:
+                    break
+                if int32(self.pending[i + 2]) == 0x3E:
+                    end, skip = self._dcs_end(i + 3, n)
+                    if end == -1:
+                        break  # the rest of the reply has not arrived yet
+                    if end >= 0:
+                        self._dcs(self.pending[i + 3:end].decode())
+                        i = end + skip
+                        continue
             if intro != 0x5B:
                 self._key(inp, now, KEY_ESCAPE, 0, EVENT_PRESS)
                 i += 1
@@ -173,12 +197,46 @@ class Keyboard:
             rest.append(self.pending[k])
         self.pending = rest
 
+    def _dcs_end(self, start: int32, n: int32) -> tuple[int32, int32]:
+        """Where the reply from `start` ends and how long its terminator is;
+        (-1, 0) when it has not all arrived, (-2, 0) when it is no reply,
+        which then reads as keys: an unterminated one must not hold up the
+        input after it."""
+        end = start
+        while end < n:
+            b = int32(self.pending[end])
+            if b == 0x9C:  # the 8-bit string terminator
+                return (end, 1)
+            if b == 0x1B:
+                if end + 1 >= n:
+                    return (-1, 0)
+                if int32(self.pending[end + 1]) == 0x5C:
+                    return (end, 2)
+                return (-2, 0)
+            if b < 0x20 or b >= 0x7F or end - start >= MAX_REPLY:
+                return (-2, 0)
+            end += 1
+        return (-1, 0)
+
+    def _dcs(self, text: str) -> None:
+        if not text.startswith("|"):
+            return
+        # "ghostty 1.1.3", "kitty(0.32.2)", "XTerm(390)"
+        name = text[1:]
+        for sep in [" ", "("]:
+            cut = name.find(sep)
+            if cut >= 0:
+                name = name[:cut]
+        self.terminal = name.lower()
+
     def _csi(self, inp: Input, now: int32, params: str, final: int32) -> None:
         if params.startswith("?"):
             if final == 0x75 and not self.kitty:  # u: the kitty flags reply
                 self.kitty = True
                 sys.stdout.write(f"\x1b[>{KITTY_FLAGS}u")
                 sys.stdout.flush()
+            elif final == 0x63:  # c: the device attributes reply
+                self.answered = True
             return
         fields = params.split(";")
         code = _number(fields[0].split(":")[0], 1)

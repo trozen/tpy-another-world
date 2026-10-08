@@ -65,6 +65,115 @@ def read_bitmap(root: str, index: int32) -> Own[list[bytes]]:
     return found
 
 
+# The sounds that repeat until stopped; the original's samples carry their
+# loop, the edition's WAV files do not.
+LOOPING_SOUNDS: list[int32] = [1, 3, 8, 16, 89, 97, 102, 104, 106, 132, 139]
+# The music the original's modules played, as recordings.
+MUSIC_TRACKS: dict[int32, str] = {7: "intro.ogg", 138: "ending.ogg"}
+
+# What a music request does with a recording.
+MUSIC_NONE = 0
+MUSIC_PLAY = 1
+MUSIC_LOOP = 2
+MUSIC_STOP = 3
+# The remastered sound's ambient tracks, which loop, and the request that
+# stops any recording.
+AMBIENT_STOP = 5000
+AMBIENT_FIRST_LOOP = 5001
+AMBIENT_LAST_LOOP = 5010
+# The ambience the last remastered ambient track set, which picks the
+# variant of some sounds: none yet, exterior, interior, or 5006's.
+AMBIENCE_NONE = 0
+AMBIENCE_EXTERIOR = 1
+AMBIENCE_INTERIOR = 2
+AMBIENCE_5006 = 3
+
+
+def sound_loops(index: int32) -> bool:
+    return index in LOOPING_SOUNDS
+
+
+def read_wgz(path: str) -> bytes:
+    """A gzipped WAV file, b"" for no path."""
+    if path == "":
+        return b""
+    with gzip.open(path) as f:
+        return f.read()
+
+
+def _numbered(sounds: str, index: int32) -> str:
+    # Some are stored under a B suffix.
+    path = find_file(sounds, f"file{index:03d}.wgz")
+    if path == "":
+        path = find_file(sounds, f"file{index:03d}B.wgz")
+    return path
+
+
+def sound_path(root: str, index: int32, remastered: bool, ambience: int32,
+               pick: int32) -> str:
+    """The file of sound `index`, "" if there is none. A few remastered
+    sounds come in variants: by the ambience playing, and `pick` (any
+    number) choosing among takes, as the edition does at random."""
+    sounds = find_file(root, "WGZ")
+    if not remastered:
+        return _numbered(find_file(sounds, "original"), index)
+    place = "GR"
+    if ambience == AMBIENCE_EXTERIOR:
+        place = "EX"
+    elif ambience == AMBIENCE_INTERIOR:
+        place = "IN"
+    if index == 81:
+        return find_file(sounds, f"file081-EX-{1 + pick % 3}.wgz")
+    if index == 85:
+        inside = "EX" if ambience == AMBIENCE_EXTERIOR else "IN"
+        return find_file(sounds, f"file085-{inside}-{1 + pick % 2}.wgz")
+    if index == 96:
+        return find_file(sounds, f"file096-{place}-{1 + pick % 3}.wgz")
+    if index == 163:
+        return find_file(sounds, f"file163-{place}-1.wgz")
+    return _numbered(sounds, index)
+
+
+def music_request(root: str, index: int32, remastered: bool) -> tuple[int32, str]:
+    """What music request `index` does: (MUSIC_*, the recording's path)."""
+    music = find_file(root, "OGG")
+    # With the original sound too, as in rawgl.
+    if index == AMBIENT_STOP:
+        return (MUSIC_STOP, "")
+    if not remastered:
+        if index not in MUSIC_TRACKS:
+            return (MUSIC_NONE, "")
+        return (MUSIC_PLAY, find_file(find_file(music, "original"), MUSIC_TRACKS[index]))
+    if index > AMBIENT_STOP:
+        path = find_file(music, f"amb{index}.ogg")
+        if AMBIENT_FIRST_LOOP <= index <= AMBIENT_LAST_LOOP:
+            return (MUSIC_LOOP, path)
+        return (MUSIC_PLAY, path)
+    if index == 7:
+        return (MUSIC_PLAY, find_file(music, "Intro_20th.ogg"))
+    # The remastered ending is not played from here, as in rawgl.
+    return (MUSIC_NONE, "")
+
+
+def ambience_of(index: int32) -> int32:
+    """The ambience ambient track `index` sets."""
+    if index == 5005:
+        return AMBIENCE_EXTERIOR
+    if index == 5006:
+        return AMBIENCE_5006
+    return AMBIENCE_INTERIOR
+
+
+def sound_period(period: int32) -> int32:
+    """The edition's period table lacks the original's 170 and starts one
+    entry later, so the bytecode's index needs shifting to the same pitch."""
+    if period != 0:
+        period -= 1
+    if period >= 32:
+        period += 1
+    return period
+
+
 def _le32(data: bytes, pos: int32) -> int64:
     """An unsigned little-endian long."""
     return int64(data[pos]) | (int64(data[pos + 1]) << 8) \
@@ -174,8 +283,8 @@ def start_vars(v: list[int32]) -> None:
     none of the protection values."""
 
 
-def part_vars(v: list[int32]) -> None:
-    # Set at every part start, as rawgl does: normal difficulty, and the
-    # original sounds rather than the remastered ones.
+def part_vars(v: list[int32], remastered: bool) -> None:
+    # Set at every part start, as rawgl does: normal difficulty, and which
+    # of the edition's sounds the bytecode asks for.
     v[0xBF] = 1
-    v[0xDE] = 0
+    v[0xDE] = 1 if remastered else 0

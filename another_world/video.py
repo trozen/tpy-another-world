@@ -156,6 +156,12 @@ class Video:
     def use_strings(self, table: Own[dict[int32, str]]) -> None:
         self.strings = table
 
+    def string(self, string_id: int32) -> str:
+        """String `string_id` of the table, "" if it has none."""
+        if string_id in self.strings:
+            return self.strings[string_id]
+        return ""
+
     def draw_string(self, string_id: int32, x: int32, y: int32, color: int32) -> None:
         """Draws a string of the table; `x` counts 8-pixel columns."""
         if string_id not in self.strings:

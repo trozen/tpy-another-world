@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Final
 
-from tpy import Own, int32, uint8
+from tpy import Own, int32, int64, uint8
 
 from .codes import read_code_strings, read_codes, read_letter_labels, relabel
 from .releases import amiga, anniversary, dos
@@ -14,6 +14,7 @@ from .releases.bytekiller import unpack
 from .releases.files import find_file
 from .releases.memlist import (RT_BITMAP, STATE_LOAD_ME, STATE_LOADED, STATE_NOT_NEEDED,
                                MemEntry)
+from .sound import Sample, no_sample, raw_sample, wav_sample
 from .text import string_table
 
 RELEASE_DOS = 0
@@ -85,6 +86,13 @@ class Resources:
     # differ, and the other way round, as lowercase keys.
     letter_labels: dict[int32, int32]
     label_keys: dict[int32, int32]
+    # The 20th Anniversary Edition's sound files, read once each, by path.
+    wavs: dict[str, bytes]
+    # Its remastered sound instead of the original's; the ambience the
+    # last ambient track set, and the state choosing among takes.
+    remastered_audio: bool
+    ambience: int32
+    pick: int32
 
     def __init__(self, data_dir: str) -> None:
         self.data_dir = data_dir
@@ -105,6 +113,10 @@ class Resources:
         self.typed_codes = True
         self.letter_labels = {}
         self.label_keys = {}
+        self.wavs = {}
+        self.remastered_audio = False
+        self.ambience = anniversary.AMBIENCE_NONE
+        self.pick = 1
         self.nth_root = anniversary.find_root(data_dir)
         memlist = dos.memlist_path(data_dir)
         if self.nth_root != "":
@@ -150,7 +162,7 @@ class Resources:
     def part_vars(self, v: list[int32]) -> None:
         """Sets the variables the release's game expects at a part start."""
         if self.release == RELEASE_20TH:
-            anniversary.part_vars(v)
+            anniversary.part_vars(v, self.remastered_audio)
         elif self.release == RELEASE_AMIGA:
             amiga.part_vars(v)
         else:
@@ -226,6 +238,36 @@ class Resources:
             else:
                 self.loaded[best] = data
                 e.state = STATE_LOADED
+
+    def sound(self, index: int32) -> Own[Sample]:
+        """Sound effect `index`, empty when it is not there to play."""
+        if self.release == RELEASE_20TH:
+            # The takes some remastered sounds have are picked by an LCG,
+            # so a run stays repeatable.
+            self.pick = int32((int64(self.pick) * 1103515245 + 12345) & 0x7FFFFFFF)
+            path = anniversary.sound_path(self.nth_root, index, self.remastered_audio,
+                                          self.ambience, self.pick >> 16)
+            if path not in self.wavs:
+                self.wavs[path] = anniversary.read_wgz(path)
+            return wav_sample(self.wavs[path], anniversary.sound_loops(index))
+        if self.is_loaded(index):
+            return raw_sample(self.entry(index))
+        return no_sample()
+
+    def sound_period(self, period: int32) -> int32:
+        if self.release == RELEASE_20TH:
+            return anniversary.sound_period(period)
+        return period
+
+    def music_request(self, index: int32) -> tuple[int32, str]:
+        """What music request `index` does with a recording: (MUSIC_*, its
+        path); MUSIC_NONE for one a module plays."""
+        if self.release != RELEASE_20TH:
+            return (anniversary.MUSIC_NONE, "")
+        request = anniversary.music_request(self.nth_root, index, self.remastered_audio)
+        if self.remastered_audio and index > anniversary.AMBIENT_STOP:
+            self.ambience = anniversary.ambience_of(index)
+        return request
 
     def is_loaded(self, index: int32) -> bool:
         return index < len(self.entries) and self.entries[index].state == STATE_LOADED

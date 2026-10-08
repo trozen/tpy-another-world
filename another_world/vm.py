@@ -8,10 +8,12 @@ from tpy import Own, int32
 from .clock import Clock
 from .codes import condition_holds
 from .keyboard import DIR_DOWN, DIR_LEFT, DIR_RIGHT, DIR_UP, Input
-from .music import Music
+from .music import Music, instrument_numbers
+from .releases.anniversary import MUSIC_LOOP, MUSIC_NONE, MUSIC_STOP
 from .releases.memlist import RT_MUSIC
 from .resource import GAME_PART_FIRST, GAME_PART_LAST, PART_INTRO, Resources
 from .screen import Screen
+from .sound import PERIODS, Mixer, period_rate
 from .video import Video, s16
 
 NUM_THREADS = 64
@@ -40,6 +42,7 @@ class VM:
     res: Resources
     video: Video
     music: Music
+    mixer: Mixer
     clock: Clock
     screen: Screen
     vars: list[int32]
@@ -63,6 +66,7 @@ class VM:
         self.res = res
         self.video = Video()
         self.music = Music()
+        self.mixer = Mixer()
         self.clock = clock
         self.screen = screen
         self.vars = [0] * 256
@@ -85,7 +89,9 @@ class VM:
         self.video.use_strings(self.res.strings())
 
     def init_for_part(self, part: int32) -> None:
+        self._render_before_change()
         self.music.stop()
+        self.mixer.stop_all()
         self.res.part_vars(self.vars)
         self.res.setup_part(part)
         self.code = self.res.segment(0)
@@ -171,10 +177,24 @@ class VM:
             self.pc[t] = self.ip & 0xFFFF
 
     def _update_music(self) -> None:
-        self.music.update(self.clock.now())
+        self._render_sound()
         if self.music.mark_pending:
             self.vars[VAR_MUS_MARK] = self.music.mark
             self.music.mark_pending = False
+
+    def _render_sound(self) -> None:
+        now = self.clock.now()
+        self.music.update(now, self.mixer)
+        self.mixer.render_to(now)
+
+    def _render_before_change(self) -> None:
+        """Mixes the sound up to now, but not past a music row still due:
+        the music steps only where it always has, so its marks reach the
+        bytecode at the same moments."""
+        now = self.clock.now()
+        if self.music.playing and self.music.next_event < now:
+            now = self.music.next_event
+        self.mixer.render_to(now)
 
     def _fetch8(self) -> int32:
         b = int32(self.code[self.ip])
@@ -319,8 +339,8 @@ class VM:
                 d = self._fetch8()
                 n = self._fetch16() & 31
                 v[d] = 0 if n >= 16 else s16((v[d] & 0xFFFF) >> n)
-            case 0x18:  # play sound: silent
-                self.ip += 5
+            case 0x18:
+                self._op_sound()
             case 0x19:
                 self._op_load(self._fetch16())
             case 0x1A:
@@ -368,21 +388,53 @@ class VM:
 
     def _op_load(self, index: int32) -> None:
         if index == 0:
+            self._render_before_change()
             self.music.stop()
+            self.mixer.stop_all()
             self.res.invalidate_media()
             return
         for bitmap in self.res.request(index):
             self.video.copy_bitmap(bitmap)
 
+    def _op_sound(self) -> None:
+        index = self._fetch16()
+        period = self.res.sound_period(min(self._fetch8(), len(PERIODS) - 1))
+        volume = min(self._fetch8(), 63)
+        voice = self._fetch8() & 3
+        self._render_before_change()
+        if volume == 0:
+            self.mixer.stop(voice)
+        else:
+            sample = self.res.sound(index)
+            rate = sample.playback_rate(period_rate(PERIODS[period]))
+            self.mixer.play(voice, sample, rate, volume)
+
     def _op_music(self) -> None:
         index = self._fetch16()
         delay = self._fetch16()
         order = self._fetch8()
+        self._render_before_change()
         if index != 0:
-            if self.res.is_loaded(index) and self.res.entries[index].kind == RT_MUSIC:
-                self.music.load(self.res.entry(index), delay, order)
+            action, track = self.res.music_request(index)
+            if action == MUSIC_STOP:
+                self.mixer.play_track("", False)
+            elif action != MUSIC_NONE:
+                self.mixer.play_track(track, action == MUSIC_LOOP)
+            elif self.res.is_loaded(index) and self.res.entries[index].kind == RT_MUSIC:
+                module = self.res.entry(index)
+                samples: list[bytes] = []
+                for n in instrument_numbers(module):
+                    if n != 0 and self.res.is_loaded(n):
+                        samples.append(self.res.entry(n))
+                    else:
+                        samples.append(b"")
+                self.music.load(module, delay, order, samples)
+                self.mixer.stop_music()
                 self.music.start(self.clock.now())
         elif delay != 0:
             self.music.set_delay(delay)
         else:
+            # A recording plays on, as in rawgl, which ignores this request in
+            # the 20th Anniversary Edition.
             self.music.stop()
+            self.mixer.stop_music()
