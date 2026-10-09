@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import argparse
 import os
+import signal
 import sys
 import time
 from argparse import ArgumentParser
+from types import FrameType
 
 from tpy import int32
 
@@ -195,6 +197,10 @@ def main() -> int32:
     # Missing or damaged data can surface at any part start; the message is
     # printed once the terminal is restored.
     failure = ""
+    # Installed after the players start and right before the try, so a kill
+    # or a closed terminal always ends through the cleanup below.
+    signal.signal(signal.SIGTERM, end_by_signal)
+    signal.signal(signal.SIGHUP, end_by_signal)
     try:
         vm.screen.begin()
         keyboard.begin()
@@ -281,6 +287,12 @@ MULTIPLEXERS = ["tmux", "screen"]
 
 RENDER_OPTIONS: dict[str, str] = {"half": "-2", "quad": "-4", "sextant": "-6", "octant": "-8",
                                   "braille": "-r braille"}
+
+
+def end_by_signal(signum: int, frame: FrameType | None) -> None:
+    """SIGTERM / SIGHUP: leave through main's cleanup, which restores the
+    terminal and stops the players, with the shell's status for the signal."""
+    sys.exit(128 + signum)
 
 
 def wait_for_answers(keyboard: Keyboard, inp: Input, clock: Clock) -> None:

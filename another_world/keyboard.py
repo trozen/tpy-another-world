@@ -107,12 +107,16 @@ class Keyboard:
         # Also after a begin() that failed before the terminal was opened.
         if not self.enabled or self.fd < 0:
             return
-        if self.kitty:
-            sys.stdout.write("\x1b[<u")
-            sys.stdout.flush()
-        saved = self.saved
-        if saved is not None:
-            termios.tcsetattr(self.fd, termios.TCSAFLUSH, saved)
+        try:
+            if self.kitty:
+                sys.stdout.write("\x1b[<u")
+                sys.stdout.flush()
+            saved = self.saved
+            if saved is not None:
+                termios.tcsetattr(self.fd, termios.TCSAFLUSH, saved)
+        except (OSError, termios.error):
+            # The terminal hung up (SIGHUP): there is nothing left to restore.
+            pass
         os.close(self.fd)
         self.fd = -1
 
