@@ -379,8 +379,12 @@ class Screen:
 
     def end(self) -> None:
         if self.mode == MODE_TERMINAL:
-            sys.stdout.write("\x1b[0m\x1b[?25h\x1b[?1049l")
-            sys.stdout.flush()
+            try:
+                sys.stdout.write("\x1b[0m\x1b[?25h\x1b[?1049l")
+                sys.stdout.flush()
+            except OSError:
+                # The terminal hung up (SIGHUP): there is nothing left to restore.
+                pass
         elif self.mode == MODE_SUMMARY:
             print(f"{self.frames} frames, digest {self.digest:08x}")
         elif self.mode == MODE_COMPARE:
