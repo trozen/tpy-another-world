@@ -61,7 +61,9 @@ def main() -> int32:
         "  sharpest picture, with octant characters (Unicode 16) that most fonts\n"
         "  lack; -6 needs sextants (Unicode 13). Ghostty draws these characters\n"
         "  itself, whatever the font, and gets -8 by default; elsewhere the\n"
-        "  default is -2, which works with any font.")
+        "  default is -2, which works with any font. On macOS, play in Ghostty\n"
+        "  (brew install --cask ghostty): other terminals there draw -8 with\n"
+        "  stripes, or not at all.")
     parser.add_argument("data", metavar="DIR", help="the game data (see game data above)")
     parser.add_argument("--part", type=int, default=16001,
                         help="the game part to start in, from 16000 (the copy protection, "
@@ -93,7 +95,7 @@ def main() -> int32:
                         help="the 20th Anniversary Edition's remastered sound and ambient "
                         "music instead of the original's")
     parser.add_argument("--mute", action="store_true",
-                        help="play no sound (sound needs pw-play, paplay or aplay)")
+                        help="play no sound (sound needs pw-play, paplay, aplay or SoX's play)")
     parser.add_argument("--wav", default="", metavar="FILE",
                         help="write the game's sound and music to FILE as WAV")
     parser.add_argument("--seed", type=int, default=0, help="the game's random seed")
@@ -265,6 +267,9 @@ def main() -> int32:
         if name != "" and level != "":
             print()
             print(f"Checkpoint code: {name} ({level}); start there with --code {name}")
+        if audio is not None and audio.missing():
+            print()
+            print(NO_SOUND)
         if keyboard.enabled:
             # The name again: a reply too late for the render mode still counts.
             tip = terminal_tip(keyboard.kitty, terminal_name(keyboard), defaulted, vm.screen)
@@ -355,6 +360,11 @@ def terminal_tip(kitty: bool, terminal: str, defaulted: bool, screen: Screen) ->
         lines.append("For the best experience, play in Ghostty.")
     return "\n".join(lines)
 
+
+# TODO: name only this system's players, and the brew hint only on macOS,
+# once TPy has sys.platform.
+NO_SOUND = "The game played without sound: it needs pw-play, paplay, aplay or\n" \
+    "SoX's play, and none of them worked. On macOS: brew install sox."
 
 # The line the game ends with.
 CLOSING_STRING = 0x265

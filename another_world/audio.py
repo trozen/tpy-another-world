@@ -15,6 +15,8 @@ PLAYERS: list[list[str]] = [
     ["pw-play", f"--rate={RATE}", "--channels=1", "--format=s16", "-"],
     ["paplay", "--raw", f"--rate={RATE}", "--channels=1", "--format=s16le"],
     ["aplay", "-q", "-t", "raw", "-f", "S16_LE", "-r", f"{RATE}", "-c", "1"],
+    # SoX, the one of them on macOS (brew install sox).
+    ["play", "-q", "-t", "raw", "-r", f"{RATE}", "-e", "signed", "-b", "16", "-c", "1", "-"],
 ]
 
 
@@ -26,6 +28,7 @@ PLAYERS: list[list[str]] = [
 FILE_PLAYERS: list[list[str]] = [
     ["pw-play", "--volume=0.25"],
     ["paplay", "--client-name=Another World music", "--volume=16384"],
+    ["play", "-q", "-v", "0.25"],
 ]
 
 # A player that ends sooner than this after its start, in seconds, is taken
@@ -40,6 +43,8 @@ class AudioOut:
     player: Popen | None
     # False once the player has gone away or been stopped.
     playing: bool
+    # Every player was missing or ended at once.
+    unavailable: bool
     # The next of PLAYERS to try, each tried once; when the player first
     # took samples, negative before; and whether silence is due before the
     # next samples.
@@ -63,6 +68,7 @@ class AudioOut:
         os.environ["LC_ALL"] = "C"
         self.player = None
         self.playing = False
+        self.unavailable = False
         self.next_player = 0
         self.first_write = -1.0
         self.lead = False
@@ -76,6 +82,10 @@ class AudioOut:
 
     def active(self) -> bool:
         return self.playing
+
+    def missing(self) -> bool:
+        """Whether no player could play, so the game ran without sound."""
+        return self.unavailable
 
     def write(self, samples: bytes) -> None:
         if len(samples) == 0:
@@ -139,6 +149,7 @@ class AudioOut:
             self.first_write = -1.0
             self.lead = True
             return
+        self.unavailable = True
 
     def _write(self, samples: bytes) -> bool:
         """Whether the player took `samples`."""

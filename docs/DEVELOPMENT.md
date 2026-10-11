@@ -30,12 +30,13 @@ follows the virtual clock too, so it sounds the same every time.
   executable, which the data files do not include; `another_world/text.py`
   carries them. The 20th Anniversary Edition's strings are read from its
   `TXT/` files.
-- Sound and music play through the first of `pw-play`, `paplay` or
-  `aplay` that works (`--mute` turns them off). The 20th Anniversary Edition
-  plays its original sound effects (`WGZ/original/`) and its recordings of
-  the original's intro and ending music (`OGG/original/`), or with
-  `--remastered-audio` its remastered sound effects and ambient music. A
-  recording needs `pw-play` or `paplay`, and `--wav` leaves it out.
+- Sound and music play through the first of `pw-play`, `paplay`, `aplay`
+  or SoX's `play` that works (`--mute` turns them off). The 20th
+  Anniversary Edition plays its original sound effects (`WGZ/original/`)
+  and its recordings of the original's intro and ending music
+  (`OGG/original/`), or with `--remastered-audio` its remastered sound
+  effects and ambient music. A recording needs `pw-play`, `paplay` or
+  `play`, and `--wav` leaves it out.
 - Not implemented: saving.
 
 ## Layout

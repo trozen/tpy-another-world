@@ -64,13 +64,19 @@ lasts about half a second. The terminal also needs 24-bit color; the
 picture is scaled to fit the window.
 
 Sound goes to the sound server through `pw-play` (PipeWire), `paplay`
-(PulseAudio) or `aplay` (ALSA), the first of them that works.
+(PulseAudio), `aplay` (ALSA) or SoX's `play`, the first of them that
+works; without one the game plays silently and says so when it quits. On
+macOS that is `play`: `brew install sox`.
 
 Use `-8` where the terminal can show it: it draws 2x4 pixels a cell, the
 sharpest picture, with octant characters (Unicode 16) that most fonts lack;
 `-6` needs sextants (Unicode 13). Ghostty draws these characters itself,
 whatever the font. Without an option, the game uses `-8` in Ghostty, which
 it detects, and `-2`, which works with any font, elsewhere.
+
+On macOS, play in Ghostty (`brew install --cask ghostty`). The fonts macOS
+ships lack octants, and with one installed that has them, iTerm2 still
+draws `-8` with stripes between the rows.
 
 ## Render modes
 
