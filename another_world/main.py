@@ -275,7 +275,7 @@ def main() -> int32:
             print(f"Checkpoint code: {name} ({level}); start there with --code {name}")
         if audio is not None and audio.missing():
             print()
-            print(NO_SOUND)
+            print(no_sound())
         if keyboard.enabled:
             # The name again: a reply too late for the render mode still counts.
             tip = terminal_tip(keyboard.kitty, terminal_name(keyboard), defaulted, vm.screen)
@@ -373,10 +373,14 @@ def terminal_tip(kitty: bool, terminal: str, defaulted: bool, screen: Screen) ->
     return "\n".join(lines)
 
 
-# TODO: name only this system's players, and the brew hint only on macOS,
-# once TPy has sys.platform.
-NO_SOUND = "The game played without sound: it needs pw-play, paplay, aplay or\n" \
-    "SoX's play, and none of them worked. On macOS: brew install sox."
+def no_sound() -> str:
+    """The quit message when no player worked, naming this system's."""
+    if sys.platform == "darwin":
+        return "The game played without sound: it needs SoX's play, which did not\n" \
+            "work. Install it with: brew install sox"
+    return "The game played without sound: it needs pw-play, paplay, aplay or\n" \
+        "SoX's play, and none of them worked."
+
 
 # The line the game ends with.
 CLOSING_STRING = 0x265
