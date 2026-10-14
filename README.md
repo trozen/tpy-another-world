@@ -31,12 +31,16 @@ them:
 ## Run
 
 The game runs on [TurboPython](https://tpy-lang.org), which compiles it to
-C++ on the first run:
+C++ on the first run. It needs TurboPython 0.7, which is not released yet;
+until it is, TurboPython is installed from its repository:
 
 ```bash
-uv tool install tpy-lang   # or: pip install tpy-lang
-tpy aw.py DIR              # DIR holds the game data
+uv tool install git+https://github.com/trozen/tpy-lang   # TurboPython's master
+tpy aw.py DIR                                            # DIR holds the game data
 ```
+
+The released TurboPython 0.6.2 (`uv tool install tpy-lang`) runs the game as
+of the `tpy-0.6.2` tag (`git checkout tpy-0.6.2`), without sound and music.
 
 In Ghostty the game draws its sharpest picture (`-8`) by default; for other
 terminals see [Terminal](#terminal). The keys are below; `tpy aw.py`
