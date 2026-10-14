@@ -1,6 +1,7 @@
 # Where displayed frames go: into the terminal as block-glyph cells, or,
 # headless, into FNV-1a digests (one per frame, in the format the headless
-# reference build prints, or one for the whole run).
+# reference build prints, or one for the whole run), or, for the benchmark,
+# nowhere: they are only counted.
 from __future__ import annotations
 
 import os
@@ -22,6 +23,8 @@ MODE_TERMINAL: Final[int32] = 0
 MODE_DIGESTS: Final[int32] = 1
 MODE_SUMMARY: Final[int32] = 2
 MODE_COMPARE: Final[int32] = 3
+# Frames are only counted: the benchmark digests the state it ends in.
+MODE_COUNT: Final[int32] = 4
 
 # Cell layouts: how many pixels one terminal cell shows, and with which glyphs.
 RENDER_HALF: Final[int32] = 0
@@ -357,7 +360,9 @@ class Screen:
     def present(self, pixels: bytearray, base: int32, palette: list[int32],
                 now: int32) -> None:
         """Shows the page at `base` in `pixels`, one palette index per byte."""
-        if self.mode == MODE_DIGESTS:
+        if self.mode == MODE_COUNT:
+            pass
+        elif self.mode == MODE_DIGESTS:
             print(f"{self.frames} {now} {frame_digest(pixels, base, palette):08x}")
         elif self.mode == MODE_SUMMARY:
             d = frame_digest(pixels, base, palette)

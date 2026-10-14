@@ -93,6 +93,9 @@ class Resources:
     remastered_audio: bool
     ambience: int32
     pick: int32
+    # Resources read from the data files so far, so a benchmark can check
+    # that none is read while it is timing the engine.
+    loads: int32
 
     def __init__(self, data_dir: str) -> None:
         self.data_dir = data_dir
@@ -117,6 +120,7 @@ class Resources:
         self.remastered_audio = False
         self.ambience = anniversary.AMBIENCE_NONE
         self.pick = 1
+        self.loads = 0
         self.nth_root = anniversary.find_root(data_dir)
         memlist = dos.memlist_path(data_dir)
         if self.nth_root != "":
@@ -202,6 +206,7 @@ class Resources:
         return bank in self.banks or find_file(self.data_dir, f"bank{bank:02x}") != ""
 
     def read(self, index: int32) -> bytes:
+        self.loads += 1
         e = self.entries[index]
         if e.bank not in self.banks:
             self.banks[e.bank] = self._read_bank_file(e.bank)
@@ -248,6 +253,7 @@ class Resources:
             path = anniversary.sound_path(self.nth_root, index, self.remastered_audio,
                                           self.ambience, self.pick >> 16)
             if path not in self.wavs:
+                self.loads += 1
                 self.wavs[path] = anniversary.read_wgz(path)
             return wav_sample(self.wavs[path], anniversary.sound_loops(index))
         if self.is_loaded(index):
@@ -279,6 +285,7 @@ class Resources:
             self.requested_part = index
             return []
         if self.release == RELEASE_20TH:
+            self.loads += 1
             return anniversary.read_bitmap(self.nth_root, index)
         if index >= len(self.entries):
             return []
@@ -356,5 +363,6 @@ class Resources:
         """One part segment: its own file in the 20th Anniversary Edition,
         a resource list entry elsewhere."""
         if self.release == RELEASE_20TH:
+            self.loads += 1
             return anniversary.read_dat(self.nth_root, index)
         return self.read(index)

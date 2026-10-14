@@ -7,7 +7,7 @@ from tpy import Own, int32
 
 from .clock import Clock
 from .codes import condition_holds
-from .keyboard import DIR_DOWN, DIR_LEFT, DIR_RIGHT, DIR_UP, Input
+from .controls import DIR_DOWN, DIR_LEFT, DIR_RIGHT, DIR_UP, Input
 from .music import Music, instrument_numbers
 from .releases.anniversary import MUSIC_LOOP, MUSIC_NONE, MUSIC_STOP
 from .releases.memlist import RT_MUSIC

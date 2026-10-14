@@ -17,7 +17,7 @@ from __future__ import annotations
 from tpy import Own, int32
 
 from .binary import be16
-from .keyboard import Input
+from .controls import Input
 from .video import s16
 
 OP_SET = 0x00

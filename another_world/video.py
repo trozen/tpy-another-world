@@ -48,9 +48,7 @@ class Video:
     strings: dict[int32, str]
 
     def __init__(self) -> None:
-        self.mem = bytearray()
-        for _ in range(4 * PAGE_SIZE):
-            self.mem.append(0)
+        self.mem = bytearray(4 * PAGE_SIZE)
         self.back = 1
         self.front = 2
         self.work = self.front
@@ -86,9 +84,8 @@ class Video:
         even = uint8(packed >> 4)
         odd = uint8(packed & 0xF)
         base = self.page_index(page) * PAGE_SIZE
-        for i in range(base, base + PAGE_SIZE, 2):
-            self.mem[i] = even
-            self.mem[i + 1] = odd
+        self.mem[base:base + PAGE_SIZE:2] = bytes([even]) * (PAGE_SIZE // 2)
+        self.mem[base + 1:base + PAGE_SIZE:2] = bytes([odd]) * (PAGE_SIZE // 2)
 
     def copy_page(self, src: int32, dst: int32, vscroll: int32) -> None:
         if src == dst:
@@ -115,13 +112,22 @@ class Video:
         self._copy(s * PAGE_SIZE + src_off, d * PAGE_SIZE + dst_off, rows * W)
 
     def _copy(self, src: int32, dst: int32, n: int32) -> None:
+        # A forward byte copy into its own source (a vertical scroll of a
+        # page onto itself) repeats the source's first rows, where a slice
+        # copy would move them; past the end a slice would grow the buffer.
+        # Both cases keep the byte loop.
+        if (dst <= src or dst >= src + n) and max(src, dst) + n <= len(self.mem):
+            self.mem[dst:dst + n] = self.mem[src:src + n]
+            return
         for i in range(n):
             self.mem[dst + i] = self.mem[src + i]
 
     def copy_bitmap(self, pixels: bytes) -> None:
         """Loads a background, one palette index per pixel, into page 0."""
-        for i in range(PAGE_SIZE):
-            self.mem[i] = pixels[i]
+        if len(pixels) < PAGE_SIZE:
+            # A slice copy would shrink the pages instead.
+            raise IndexError("a background shorter than a page")
+        self.mem[:PAGE_SIZE] = pixels[:PAGE_SIZE]
 
     def set_palette(self, palettes: bytes, n: int32) -> None:
         if n >= 32:
@@ -305,16 +311,14 @@ class Video:
         hi = max(xa, xb)
         row = y * W
         base = self.work * PAGE_SIZE + row
+        # The caller clips the span to 0 <= lo <= hi <= 319.
         if color < COLOR_BLEND:
-            c = uint8(color)
-            for x in range(base + lo, base + hi + 1):
-                self.mem[x] = c
+            self.mem[base + lo:base + hi + 1] = bytes([uint8(color)]) * (hi - lo + 1)
         elif color == COLOR_BLEND:
             for x in range(base + lo, base + hi + 1):
                 self.mem[x] = self.mem[x] | 8
         else:
-            for x in range(lo, hi + 1):
-                self.mem[base + x] = self.mem[row + x]
+            self.mem[base + lo:base + hi + 1] = self.mem[row + lo:row + hi + 1]
 
     def _draw_point(self, color: int32, x: int32, y: int32) -> None:
         if x < 0 or x > 319 or y < 0 or y > 199:

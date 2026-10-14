@@ -11,10 +11,7 @@ import tty
 
 from tpy import int32, int64
 
-DIR_LEFT = 1
-DIR_RIGHT = 2
-DIR_UP = 4
-DIR_DOWN = 8
+from .controls import DIR_DOWN, DIR_LEFT, DIR_RIGHT, DIR_UP, Input
 
 # Key codes: ASCII for the character keys, these above it for the arrows.
 KEY_BACKSPACE = 8
@@ -43,25 +40,6 @@ HELD = 0x7FFFFFFF
 KITTY_FLAGS = 11
 # The longest XTVERSION reply taken; anything longer is not one.
 MAX_REPLY = 64
-
-
-class Input:
-    dir_mask: int32
-    button: bool
-    # The last character typed, 0 once the password screen has taken it.
-    last_char: int32
-    # Pressed since the engine last looked.
-    pause: bool
-    code: bool
-    quit: bool
-
-    def __init__(self) -> None:
-        self.dir_mask = 0
-        self.button = False
-        self.last_char = 0
-        self.pause = False
-        self.code = False
-        self.quit = False
 
 
 class Keyboard:

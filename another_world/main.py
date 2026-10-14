@@ -14,7 +14,8 @@ from tpy import int32
 from .audio import AudioOut
 from .clock import Clock
 from .codes import VAR_CHECKPOINT, CodeTyper, continue_screen_string
-from .keyboard import Input, Keyboard
+from .controls import Input
+from .keyboard import Keyboard
 from .resource import GAME_PART_FIRST, GAME_PART_LAST, PART_INTRO, RELEASE_20TH, Resources
 from .screen import (H, MODE_COMPARE, MODE_DIGESTS, MODE_SUMMARY, MODE_TERMINAL, RENDER_NAMES,
                      RENDER_OCTANT, W, Cells, Screen)
