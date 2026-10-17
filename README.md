@@ -121,23 +121,24 @@ How the engine is checked, its headless runs and its source layout:
 
 ## Benchmark
 
-TPy runs the benchmark 25x faster than CPython 3.14, 2.7x faster than
+TPy runs the benchmark 25x faster than CPython 3.14, 2.5x faster than
 PyPy and 1.5x faster than Shedskin.
 
 The engine runs under TPy and under other ways of running the same
 Python source. A batch is three scenes of the DOS release, 1460 timed
-frames. Each runner runs 5 processes of 10 batches; a process counts the
-median of its batches 4-10, and the table gives the median over the
+frames. Each runner runs 5 processes of 20 batches; a process counts the
+median of its batches 11-20, and the table gives the median over the
 processes. All runs are on one pinned CPU of a Ryzen 9 5950X, and every
 run's end-state digests are checked.
 
 | Runner | ms per batch | vs TPy (slower) |
 |---|---:|---:|
-| TPy | 34.7 ms | 1.0x |
-| CPython 3.14 | 870 ms | 25.1x |
-| PyPy 3.11 | 93.5 ms | 2.7x |
-| Nuitka (CPython 3.14) | 1265 ms | 36.5x |
-| mypyc (CPython 3.14) | 203 ms | 5.8x |
+| TPy | 34.5 ms | 1.0x |
+| CPython 3.14 | 870 ms | 25.2x |
+| PyPy 3.11 | 93.6 ms | 2.7x |
+| PyPy 3.12 | 87.2 ms | 2.5x |
+| Nuitka (CPython 3.14) | 1280 ms | 37.1x |
+| mypyc (CPython 3.14) | 202 ms | 5.9x |
 | Shedskin -O3 | 52.6 ms | 1.5x |
 
 The DOS release's files are not part of the GOG edition;

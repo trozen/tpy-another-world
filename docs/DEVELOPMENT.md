@@ -14,12 +14,14 @@ follows the virtual clock too, so it sounds the same every time.
 
 ## Running under Python
 
-The same source runs under Python 3.12 or newer, with the benchmark's
-stand-in for TurboPython's `tpy` module on the path (see
+The same source runs under Python 3.12 or newer, or PyPy 3.11 or 3.12, with
+the `tpy` package tpy-lang ships for CPython on the path (`lib/cpy` in a
+TPy checkout, or a Python with tpy-lang installed). `TPY_CPYTHON_FAST=1`
+makes its fixed-width types plain `int`s, as the benchmark runs it (see
 [Fairness](#fairness)):
 
 ```bash
-PYTHONPATH=bench/stub python3 aw.py DIR
+TPY_CPYTHON_FAST=1 PYTHONPATH=TPY_CHECKOUT/lib/cpy python3 aw.py DIR
 ```
 
 ## Benchmark
@@ -57,16 +59,19 @@ music state are not in the digest. core.py checks it against the scene's
 digest, and a scene that ends in another state fails the run.
 
 `bench.py run` starts every runner once per round, in an order rotated by
-one place each round, for 5 rounds; each process runs 10 batches. A
-process's time is the median of its batches 4-10; the table gives the
+one place each round, for 5 rounds; each process runs 20 batches. A
+process's time is the median of its batches 11-20, after PyPy's JIT has
+settled (it still gains 5-8% between batches 4 and 11); the table gives the
 median over the 5 processes, with the smallest and largest in brackets,
 and "vs TPy (slower)" divides medians.
 
 ### Fairness
 
 - Every runner runs the same engine source, `another_world/`, unchanged.
-- The Python runners (CPython, PyPy, Nuitka, mypyc) import `bench/stub`
-  as `tpy`: each fixed-width type is `int`, and `Own[T]` is `T`. That is
+- The Python runners (CPython, PyPy, Nuitka, mypyc) import tpy-lang's
+  `tpy` package in fast mode (`TPY_CPYTHON_FAST=1`): each fixed-width
+  type is `int`, and `Own[T]` is `T`. mypyc compiles against the package's
+  static view of the same, and leaves `tpy` itself interpreted. That is
   sound here because TPy's conversions raise when a value leaves the type's
   range, and the TPy build completes the scenes, so every conversion on
   these inputs is the identity. The runs are deterministic, and every
@@ -93,6 +98,7 @@ and "vs TPy (slower)" divides medians.
 | TPy | 0.7.0.dev0, `tpy -b`, its release build, with g++ 14.2; bounds, integer overflow and conversion checks stay on, elided only where the compiler proves them |
 | CPython 3.14 | 3.14.2, uv's python-build-standalone build |
 | PyPy 3.11 | PyPy 7.3.20, uv's build, with its JIT |
+| PyPy 3.12 | PyPy 8.0.1, pypy.org's linux64 build, with its JIT |
 | Nuitka | Nuitka 4.2.2 on CPython 3.14, in its default accelerated mode, with `--follow-imports` and its default release flags; the build checks that every engine module is compiled |
 | mypyc | mypy 2.4.0 on CPython 3.14, opt level 3; the modules load as extensions |
 | Shedskin -O3 | Shedskin 1.0-pre with the fix above, g++ 14.2 with `-O3 -std=c++20 -march=native` from build.py's flags file; index bounds checks and negative-index normalisation on |
@@ -100,21 +106,22 @@ and "vs TPy (slower)" divides medians.
 
 ### Results
 
-Measured 2026-10-14:
+Measured 2026-10-17:
 
-AMD Ryzen 9 5950X 16-Core Processor, Linux 7.0.0-34-generic, pinned to CPU 11; tpy 0.7.0.dev0 (v0.6.2-105-g5cf80fc2c0), CPython 3.14.2, PyPy 7.3.20, Nuitka 4.2.2, mypy 2.4.0, Shedskin 1.0-pre (765a4053) with g++-14 (Ubuntu 14.2.0-4ubuntu2~24.04.1) 14.2.0.
+AMD Ryzen 9 5950X 16-Core Processor, Linux 7.0.0-34-generic, pinned to CPU 11; tpy 0.7.0.dev0 (v0.6.2-105-g5cf80fc2c0), CPython 3.14.2, PyPy 7.3.20, PyPy 8.0.1, Nuitka 4.2.2, mypy 2.4.0, Shedskin 1.0-pre (765a4053) with g++-14 (Ubuntu 14.2.0-4ubuntu2~24.04.1) 14.2.0.
 
-5 processes x 10 batches; a process's batch time is the median of its batches 4-10; median [min-max] over the processes.
+5 processes x 20 batches; a process's batch time is the median of its batches 11-20; median [min-max] over the processes.
 
 | runner | ms per batch | vs TPy (slower) |
 |---|---:|---:|
-| TPy | 34.7 ms [34.2 ms-36.4 ms] | 1.0x |
-| CPython 3.14 | 870 ms [869 ms-883 ms] | 25.1x |
-| PyPy 3.11 | 93.5 ms [93.4 ms-94.1 ms] | 2.7x |
-| Nuitka (CPython 3.14) | 1265 ms [1257 ms-1286 ms] | 36.5x |
-| mypyc (CPython 3.14) | 203 ms [201 ms-204 ms] | 5.8x |
-| Shedskin -O3 | 52.6 ms [52.4 ms-53.3 ms] | 1.5x |
-| Shedskin -O3 --nobounds --nowrap (unchecked) | 51.7 ms [51.4 ms-52.4 ms] | 1.5x |
+| TPy | 34.5 ms [34.0 ms-36.3 ms] | 1.0x |
+| CPython 3.14 | 870 ms [869 ms-873 ms] | 25.2x |
+| PyPy 3.11 | 93.6 ms [92.7 ms-95.1 ms] | 2.7x |
+| PyPy 3.12 | 87.2 ms [86.6 ms-88.0 ms] | 2.5x |
+| Nuitka (CPython 3.14) | 1280 ms [1261 ms-1284 ms] | 37.1x |
+| mypyc (CPython 3.14) | 202 ms [201 ms-205 ms] | 5.9x |
+| Shedskin -O3 | 52.6 ms [52.3 ms-52.7 ms] | 1.5x |
+| Shedskin -O3 --nobounds --nowrap (unchecked) | 51.3 ms [51.0 ms-51.9 ms] | 1.5x |
 
 ### Reproducing
 
@@ -143,6 +150,7 @@ The tools go in one directory, VENVS, which `--venvs` names (default
 `__tpyc__/bench/venvs` in the repository, which git ignores):
 
     uv python install 3.14 pypy3.11
+    curl -L https://downloads.python.org/pypy/pypy3.12-v8.0.1-linux64.tar.gz | tar xz -C VENVS
     uv venv -p 3.14 VENVS/venv-nuitka && VIRTUAL_ENV=VENVS/venv-nuitka uv pip install nuitka==4.2.2
     uv venv -p 3.14 VENVS/venv-mypyc && VIRTUAL_ENV=VENVS/venv-mypyc uv pip install mypy==2.4.0 setuptools
     git clone https://github.com/shedskin/shedskin SHEDSKIN && git -C SHEDSKIN checkout 765a4053
@@ -151,19 +159,26 @@ The tools go in one directory, VENVS, which `--venvs` names (default
 Shedskin is installed editable from the clone: its build reads the
 clone's commit for the table. It also needs the Boehm GC headers
 (`libgc-dev`) and g++-14 (`build --cxx` names another C++ compiler).
-TPY_CHECKOUT is a TPy source checkout at or after commit 5cf80fc2c0,
-which has bytearray slice assignment (the 0.6 releases on PyPI do not).
-Then:
+TPY_CHECKOUT is a TPy source checkout at or after commit 6eb8355a02:
+it has bytearray slice assignment (the 0.6 releases on PyPI do not), and
+its `tpy` package has the fast mode and does not import asyncio, which
+costs PyPy 5% here. Then:
 
-    python3 bench/bench.py --venvs VENVS build --tpy "uv run --project TPY_CHECKOUT tpy" --shedskin VENVS/ssvenv/bin/shedskin
-    python3 bench/bench.py --venvs VENVS run --cpu 11
+    python3 bench/bench.py --venvs VENVS --tpy-lib TPY_CHECKOUT/lib/cpy build --tpy "uv run --project TPY_CHECKOUT tpy" --shedskin VENVS/ssvenv/bin/shedskin
+    python3 bench/bench.py --venvs VENVS --tpy-lib TPY_CHECKOUT/lib/cpy --pypy312 VENVS/pypy3.12-v8.0.1-linux64/bin/pypy3.12 run --cpu 11
+
+Without `--tpy-lib`, the Python runners use the `tpy` package of the
+Python behind the `tpy` command on the PATH. uv (0.9) has no PyPy 3.12
+build yet, hence pypy.org's (its SHA-256 is on
+[pypy.org/checksums.html](https://pypy.org/checksums.html)); `--cpython`,
+`--pypy311` and `--pypy312` name other interpreters.
 
 `build` takes `--only` (some of `tpy,shedskin,nuitka,mypyc`) and records
 each build's source hash and tool version; `run` refuses a build whose
 sources changed since. `run` takes `--processes` (default 5), `--batches`
-(10), `--steady-from` (4), `--cpu N` to pin every process to one CPU (no
-pinning by default) and `--runners` (some of `tpy, cpython, pypy, nuitka,
-mypyc, shedskin, shedskin-unchecked`). It prints the table and writes the
+(20), `--steady-from` (11), `--cpu N` to pin every process to one CPU (no
+pinning by default) and `--runners` (some of `tpy, cpython, pypy311, pypy312,
+nuitka, mypyc, shedskin, shedskin-unchecked`). It prints the table and writes the
 raw samples to `__tpyc__/bench/results/`, which git ignores.
 
 ### Caveats
@@ -178,6 +193,12 @@ raw samples to `__tpyc__/bench/results/`, which git ignores.
   release flags: its code is slower than this CPython's interpreter on
   bytearray stores, int arithmetic and method calls (micro-probe,
   2026-10-14).
+- PyPy's steady state moves by 5-7% with things the engine never
+  touches. On PyPy 3.11 the previous 20-line `tpy` stub gives 87 ms a
+  batch and tpy-lang's 93.5 ms; 150 empty classes added to the old stub
+  cost the same 6 ms there, and nothing on PyPy 3.12. PyPy 3.12 with
+  tpy-lang's stub gives 87 ms under bench.py and 92 ms started by hand
+  (batches 11-20, 2026-10-17). Read the PyPy rows as +-5%.
 - Most of the gap between Shedskin and TPy is allocating the
   `bytes([c]) * n` and slice-read temporaries of each polygon span (Boehm
   GC against malloc, out-of-line runtime calls); TPy pays for those
@@ -217,7 +238,7 @@ raw samples to `__tpyc__/bench/results/`, which git ignores.
 | File | What |
 |---|---|
 | `aw.py` | entry point |
-| `bench/` | the benchmark: `core.py` (the timed driver), `bench.py` (`build`, `run`), `stub/` (the `tpy` stub the Python runners use), `shedskin/` (the Shedskin build) |
+| `bench/` | the benchmark: `core.py` (the timed driver), `bench.py` (`build`, `run`), `shedskin/` (the Shedskin build) |
 | `another_world/main.py` | command line and the engine loop |
 | `another_world/resource.py` | release detection, the resource list DOS and Amiga share, per-part loading |
 | `another_world/releases/dos.py` | MEMLIST.BIN and the DOS start values |

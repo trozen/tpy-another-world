@@ -30,7 +30,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 OUT = os.path.join(REPO, "__tpyc__", "bench")
 CORE = os.path.join(HERE, "core.py")
-STUB = os.path.join(HERE, "stub")
 BUILDS = ["tpy", "shedskin", "nuitka", "mypyc"]
 
 
@@ -53,19 +52,27 @@ def scenes() -> dict[str, str]:
     sys.exit("bench.py: no SCENES in core.py")
 
 
-def sources_hash(build: str) -> str:
+def tpy_package(lib: str) -> list[str]:
+    """The tpy package's sources under LIB, relative to it."""
+    root = os.path.join(lib, "tpy")
+    return sorted(os.path.relpath(os.path.join(d, n), lib) for d, _, names in os.walk(root)
+                  for n in names if n.endswith(".py"))
+
+
+def sources_hash(build: str, tpy_lib: str) -> str:
     """The sources a build compiles, so `run` can tell a stale build."""
-    files = reached_modules()
+    files = [os.path.join(REPO, rel) for rel in reached_modules()]
     if build in ("nuitka", "mypyc"):
-        files.append(os.path.join("bench", "stub", "tpy", "__init__.py"))
+        files += [os.path.join(tpy_lib, rel) for rel in tpy_package(tpy_lib)]
     if build == "shedskin":
         stubs = os.path.join("bench", "shedskin", "stubs")
-        files += [os.path.join("bench", "shedskin", "build.py")] + [
-            os.path.join(stubs, n) for n in sorted(os.listdir(os.path.join(REPO, stubs)))
+        files += [os.path.join(REPO, "bench", "shedskin", "build.py")] + [
+            os.path.join(REPO, stubs, n) for n in sorted(os.listdir(os.path.join(REPO, stubs)))
             if n.endswith(".py")]
     h = hashlib.sha256()
-    for rel in files:
-        h.update(rel.encode() + b"\0" + open(os.path.join(REPO, rel), "rb").read())
+    for path in files:
+        name = os.path.relpath(path, REPO if path.startswith(REPO + os.sep) else tpy_lib)
+        h.update(name.encode() + b"\0" + open(path, "rb").read())
     return h.hexdigest()
 
 
@@ -86,7 +93,8 @@ def check(cmd: list[str], cwd: str = REPO, env: dict[str, str] | None = None) ->
 
 
 def python_env(paths: list[str]) -> dict[str, str]:
-    env = dict(os.environ, PYTHONPATH=os.pathsep.join(paths))
+    # Fast mode: tpy's fixed-width types are int (see docs/DEVELOPMENT.md#fairness).
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join(paths), TPY_CPYTHON_FAST="1")
     env.pop("PYTHONHOME", None)
     return env
 
@@ -105,31 +113,55 @@ def nuitka_env(build: str) -> dict[str, str]:
     return env
 
 
+def find_tpy_lib(arg: str) -> str:
+    """The directory tpy-lang's `tpy` package is in: ARG, or where the Python
+    behind the `tpy` command imports it from."""
+    lib = os.path.abspath(arg) if arg else ""
+    if not lib:
+        cmd = shutil.which("tpy") or ""
+        try:
+            shebang = open(cmd, "rb").readline().decode()
+        except (OSError, UnicodeDecodeError):
+            shebang = ""
+        if shebang.startswith("#!"):
+            lib = first_line(shlex.split(shebang[2:]) + [
+                "-c", "import os, tpy; print(os.path.dirname(os.path.dirname(tpy.__file__)))"],
+                cwd="/")
+    init = os.path.join(lib, "tpy", "__init__.py")
+    if not lib or not os.path.exists(init) or "TPY_CPYTHON_FAST" not in open(init).read():
+        sys.exit("bench.py: no tpy package with fast mode (tpy-lang after 0.7.0.dev0's "
+                 "de3f644fa6); name its directory with --tpy-lib")
+    return lib
+
+
 class Tools:
     def __init__(self, args: argparse.Namespace) -> None:
+        self.tpy_lib = find_tpy_lib(args.tpy_lib)
         uv = lambda spec: first_line(["uv", "python", "find", "--no-project", spec], cwd="/")
         self.cpython = args.cpython or uv("cpython3.14")
-        self.pypy = args.pypy or uv("pypy3.11")
+        self.pypy311 = args.pypy311 or uv("pypy3.11")
+        self.pypy312 = args.pypy312 or uv("pypy3.12")
         venvs = os.path.abspath(args.venvs)
         self.nuitka = os.path.join(venvs, "venv-nuitka", "bin", "python")
         self.mypyc = os.path.join(venvs, "venv-mypyc", "bin", "python")
 
     def runners(self) -> list[tuple[str, str, str, list[str], dict[str, str], str]]:
         """(name, label, build directory or "", argv, env, cwd), in table order."""
-        py = python_env([STUB, REPO])
+        py = python_env([self.tpy_lib, REPO])
         mypyc = os.path.join(OUT, "mypyc")
         ss = lambda v: [os.path.join(OUT, f"shedskin-{v}", "src", "core")]
         return [("tpy", "TPy", "tpy", [os.path.join(OUT, "tpy", "release", "core")],
                  python_env([]), REPO),
                 ("cpython", "CPython 3.14", "", [self.cpython, "-s", CORE], py, REPO),
-                ("pypy", "PyPy 3.11", "", [self.pypy, "-s", CORE], py, REPO),
+                ("pypy311", "PyPy 3.11", "", [self.pypy311, "-s", CORE], py, REPO),
+                ("pypy312", "PyPy 3.12", "", [self.pypy312, "-s", CORE], py, REPO),
                 ("nuitka", "Nuitka (CPython 3.14)", "nuitka",
                  [os.path.join(OUT, "nuitka", "core.bin")], nuitka_env(os.path.join(OUT, "nuitka")),
                  REPO),
                 # -P: the compiled tree is where the modules come from.
                 ("mypyc", "mypyc (CPython 3.14)", "mypyc",
                  [self.mypyc, "-P", "-s", "-c", "import sys, core; sys.exit(core.main())"],
-                 python_env([mypyc]), mypyc),
+                 python_env([mypyc, self.tpy_lib]), mypyc),
                 ("shedskin", "Shedskin -O3", "shedskin-O3", ss("O3"), python_env([]), REPO),
                 ("shedskin-unchecked", "Shedskin -O3 --nobounds --nowrap (unchecked)",
                  "shedskin-O3-unchecked", ss("O3-unchecked"), python_env([]), REPO)]
@@ -153,7 +185,7 @@ def cmd_build(args: argparse.Namespace) -> int:
     tpy = shlex.split(args.tpy)
     if "tpy" in only:
         check(tpy + ["--rebuild", "-L", REPO, "-o", os.path.join(OUT, "tpy"), "-b", CORE])
-        record("tpy", sources_hash("tpy"), first_line(tpy + ["--version"]))
+        record("tpy", sources_hash("tpy", tools.tpy_lib), first_line(tpy + ["--version"]))
     if "shedskin" in only:
         cxx = first_line([args.cxx, "--version"])
         for v in ("O3", "O3-unchecked"):
@@ -161,36 +193,41 @@ def cmd_build(args: argparse.Namespace) -> int:
             check([sys.executable, os.path.join(HERE, "shedskin", "build.py"), "--variant", v,
                    "--shedskin", args.shedskin, "--cxx", args.cxx, "--out", out])
             version = json.load(open(os.path.join(out, "build.json")))["version"]
-            record(f"shedskin-{v}", sources_hash("shedskin"), f"{version} with {cxx}")
+            record(f"shedskin-{v}", sources_hash("shedskin", tools.tpy_lib), f"{version} with {cxx}")
     if "nuitka" in only:
         out = os.path.join(OUT, "nuitka")
         shutil.rmtree(out, ignore_errors=True)
         report = os.path.join(out, "report.xml")
         check([tools.nuitka, "-m", "nuitka", "--follow-imports", f"--output-dir={out}",
-               f"--report={report}", CORE], env=python_env([STUB, REPO]))
+               f"--report={report}", CORE], env=python_env([tools.tpy_lib, REPO]))
         kinds = {m.get("name", ""): m.get("kind", "")
                  for m in ET.parse(report).getroot().iter("module")}
         ours = [n for n in kinds if n == "tpy" or n.startswith("another_world")]
         if "another_world.vm" not in ours or any(
                 not kinds[n].startswith("Compiled") for n in ours):
             sys.exit(f"bench.py: Nuitka left some of the game uncompiled: {kinds}")
-        record("nuitka", sources_hash("nuitka"),
+        record("nuitka", sources_hash("nuitka", tools.tpy_lib),
                "Nuitka " + first_line([tools.nuitka, "-m", "nuitka", "--version"]))
     if "mypyc" in only:
         # Only the modules core.py reaches: mypy rejects some it does not.
+        # tpy stays interpreted; mypy reads its static view from MYPYPATH,
+        # and from there reports errors in the package's own body, which it
+        # would not for an installed package.
         out = os.path.join(OUT, "mypyc")
         shutil.rmtree(out, ignore_errors=True)
-        files = [os.path.join("tpy", "__init__.py")]
-        os.makedirs(os.path.join(out, "tpy"))
-        shutil.copy(os.path.join(STUB, files[0]), os.path.join(out, files[0]))
+        os.makedirs(out)
+        with open(os.path.join(out, "mypy.ini"), "w") as f:
+            f.write("[mypy]\n[mypy-tpy.*]\nignore_errors = True\n")
+        files = []
         for rel in reached_modules():
             dest = os.path.basename(rel) if rel.startswith("bench") else rel
             os.makedirs(os.path.join(out, os.path.dirname(dest)), exist_ok=True)
             shutil.copy(os.path.join(REPO, rel), os.path.join(out, dest))
             files.append(dest)
-        check([os.path.join(os.path.dirname(tools.mypyc), "mypyc")] + files, cwd=out)
+        check([os.path.join(os.path.dirname(tools.mypyc), "mypyc")] + files, cwd=out,
+              env=dict(os.environ, MYPYPATH=tools.tpy_lib))
         mypy = first_line([tools.mypyc, "-c", "import mypy.version as v; print(v.__version__)"])
-        record("mypyc", sources_hash("mypyc"), f"mypy {mypy}")
+        record("mypyc", sources_hash("mypyc", tools.tpy_lib), f"mypy {mypy}")
     return 0
 
 
@@ -241,13 +278,14 @@ def cmd_run(args: argparse.Namespace) -> int:
     versions: list[str] = []
     for name, _, build, argv, _, cwd in runners:
         if not os.path.exists(argv[0]) or not os.path.isdir(cwd):
-            sys.exit(f"bench.py: no {name} (bench.py build)")
+            sys.exit(f"bench.py: no {name} " + ("(bench.py build)" if build else
+                                                 f"(--{name} names its interpreter)"))
         if not build:
             versions.append(tools.interpreter(argv[0]))
             continue
         path = os.path.join(OUT, build, "bench-build.json")
         info = json.load(open(path)) if os.path.exists(path) else {}
-        if info.get("sources") != sources_hash(build.split("-")[0]):
+        if info.get("sources") != sources_hash(build.split("-")[0], tools.tpy_lib):
             sys.exit(f"bench.py: the {name} build is stale or unrecorded (bench.py build)")
         versions.append(info["version"])
     want = scenes()
@@ -302,9 +340,13 @@ def cmd_run(args: argparse.Namespace) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description="The Another World engine benchmark.")
     parser.add_argument("--cpython", default="", help="default: uv's cpython3.14")
-    parser.add_argument("--pypy", default="", help="default: uv's pypy3.11")
+    parser.add_argument("--pypy311", default="", help="default: uv's pypy3.11")
+    parser.add_argument("--pypy312", default="", help="default: uv's pypy3.12")
     parser.add_argument("--venvs", default=os.path.join(OUT, "venvs"), metavar="DIR",
                         help="where venv-nuitka and venv-mypyc are")
+    parser.add_argument("--tpy-lib", default="", metavar="DIR",
+                        help="the directory of tpy-lang's tpy package, for the Python runners "
+                             "(default: the tpy command's)")
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("build", help="build the runners")
     p.add_argument("--only", default=",".join(BUILDS))
@@ -315,8 +357,8 @@ def main() -> int:
     p = sub.add_parser("run", help="time the runners")
     p.add_argument("--data", default=os.path.join(REPO, "data", "pc"))
     p.add_argument("--processes", type=int, default=5)
-    p.add_argument("--batches", type=int, default=10)
-    p.add_argument("--steady-from", type=int, default=4)
+    p.add_argument("--batches", type=int, default=20)
+    p.add_argument("--steady-from", type=int, default=11)
     p.add_argument("--cpu", type=int, default=-1, help="the CPU to pin to (default: none)")
     p.add_argument("--runners", default="", help="comma-separated runner names")
     p.set_defaults(func=cmd_run)
