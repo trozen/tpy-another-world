@@ -103,9 +103,7 @@ def main() -> int32:
                         help="write the game's sound and music to FILE as WAV")
     parser.add_argument("--seed", type=int, default=0, help="the game's random seed")
     # A bare run shows the help, like --help.
-    argv: list[str] = []
-    for arg in sys.argv[1:]:
-        argv.append(arg)
+    argv = list(sys.argv[1:])
     if len(argv) == 0:
         argv.append("--help")
     args = parser.parse_args(argv)
@@ -392,7 +390,7 @@ def checkpoint_code(vm: VM) -> str:
     screen would show, or where the part has none for it, the part's code
     of the latest checkpoint reached; "" for none."""
     checkpoint = vm.vars[VAR_CHECKPOINT]
-    name = vm.video.string(continue_screen_string(vm.code, checkpoint))
+    name = vm.video.string(continue_screen_string(vm.res.bytecode, checkpoint))
     if name != "":
         return name
     best = -1

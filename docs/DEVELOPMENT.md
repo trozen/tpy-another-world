@@ -159,16 +159,16 @@ The tools go in one directory, VENVS, which `--venvs` names (default
 Shedskin is installed editable from the clone: its build reads the
 clone's commit for the table. It also needs the Boehm GC headers
 (`libgc-dev`) and g++-14 (`build --cxx` names another C++ compiler).
-TPY_CHECKOUT is a TPy source checkout at or after commit 6eb8355a02:
-it has bytearray slice assignment (the 0.6 releases on PyPI do not), and
-its `tpy` package has the fast mode and does not import asyncio, which
-costs PyPy 5% here. Then:
+TPy is 0.7 or later (`uv tool install tpy-lang`): it has bytearray
+slice assignment (0.6 does not), and its `tpy` package has the fast mode
+and does not import asyncio, which costs PyPy 5% here. Then:
 
-    python3 bench/bench.py --venvs VENVS --tpy-lib TPY_CHECKOUT/lib/cpy build --tpy "uv run --project TPY_CHECKOUT tpy" --shedskin VENVS/ssvenv/bin/shedskin
-    python3 bench/bench.py --venvs VENVS --tpy-lib TPY_CHECKOUT/lib/cpy --pypy312 VENVS/pypy3.12-v8.0.1-linux64/bin/pypy3.12 run --cpu 11
+    python3 bench/bench.py --venvs VENVS build --shedskin VENVS/ssvenv/bin/shedskin
+    python3 bench/bench.py --venvs VENVS --pypy312 VENVS/pypy3.12-v8.0.1-linux64/bin/pypy3.12 run --cpu 11
 
-Without `--tpy-lib`, the Python runners use the `tpy` package of the
-Python behind the `tpy` command on the PATH. uv (0.9) has no PyPy 3.12
+The Python runners use the `tpy` package of the Python behind the `tpy`
+command on the PATH; `--tpy-lib` names another (a TPy checkout's
+`lib/cpy`), and `--tpy` another `tpy` command. uv (0.9) has no PyPy 3.12
 build yet, hence pypy.org's (its SHA-256 is on
 [pypy.org/checksums.html](https://pypy.org/checksums.html)); `--cpython`,
 `--pypy311` and `--pypy312` name other interpreters.

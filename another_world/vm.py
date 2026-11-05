@@ -52,11 +52,6 @@ class VM:
     requested_paused: list[int32]
     stack: list[int32]
     sp: int32
-    # The current part's segments, copied out of Resources.
-    code: bytes
-    palettes: bytes
-    cinematic: bytes
-    shapes: bytes
     ip: int32
     yielded: bool
     last_blit: int32
@@ -76,10 +71,6 @@ class VM:
         self.requested_paused = [0] * NUM_THREADS
         self.stack = [0] * 256
         self.sp = 0
-        self.code = b""
-        self.palettes = b""
-        self.cinematic = b""
-        self.shapes = b""
         self.ip = 0
         self.yielded = False
         self.last_blit = 0
@@ -94,10 +85,6 @@ class VM:
         self.mixer.stop_all()
         self.res.part_vars(self.vars)
         self.res.setup_part(part)
-        self.code = self.res.segment(0)
-        self.palettes = self.res.segment(1)
-        self.cinematic = self.res.segment(2)
-        self.shapes = self.res.segment(3)
         for t in range(NUM_THREADS):
             self.pc[t] = INACTIVE
             self.requested_pc[t] = NO_REQUEST
@@ -197,7 +184,7 @@ class VM:
         self.mixer.render_to(now)
 
     def _fetch8(self) -> int32:
-        b = int32(self.code[self.ip])
+        b = int32(self.res.bytecode[self.ip])
         self.ip += 1
         return b
 
@@ -225,7 +212,7 @@ class VM:
         if h > 0:
             y = 199
             x += h
-        self.video.draw_shape(self.cinematic, off, 0xFF, 0x40, x, y)
+        self.video.draw_shape(self.res.cinematic, off, 0xFF, 0x40, x, y)
 
     def _op_draw_shape(self, op: int32) -> None:
         off = (self._fetch16() * 2) & 0xFFFF
@@ -258,9 +245,9 @@ class VM:
             self.ip -= 1
             zoom = 0x40
         if use_shapes:
-            self.video.draw_shape(self.shapes, off, 0xFF, zoom, x, y)
+            self.video.draw_shape(self.res.shapes, off, 0xFF, zoom, x, y)
         else:
-            self.video.draw_shape(self.cinematic, off, 0xFF, zoom, x, y)
+            self.video.draw_shape(self.res.cinematic, off, 0xFF, zoom, x, y)
 
     def _op(self, op: int32) -> None:
         v = self.vars
@@ -383,7 +370,7 @@ class VM:
             self._update_music()
         self.last_blit = self.clock.now()
         self.vars[0xF7] = 0
-        self.video.flip(page, self.palettes)
+        self.video.flip(page, self.res.palettes)
         self.video.show(self.screen, self.clock.now())
 
     def _op_load(self, index: int32) -> None:
@@ -421,11 +408,11 @@ class VM:
             elif action != MUSIC_NONE:
                 self.mixer.play_track(track, action == MUSIC_LOOP)
             elif self.res.is_loaded(index) and self.res.entries[index].kind == RT_MUSIC:
-                module = self.res.entry(index)
+                module = self.res.loaded[index]
                 samples: list[bytes] = []
                 for n in instrument_numbers(module):
                     if n != 0 and self.res.is_loaded(n):
-                        samples.append(self.res.entry(n))
+                        samples.append(self.res.loaded[n])
                     else:
                         samples.append(b"")
                 self.music.load(module, delay, order, samples)

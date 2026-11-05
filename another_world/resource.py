@@ -257,7 +257,7 @@ class Resources:
                 self.wavs[path] = anniversary.read_wgz(path)
             return wav_sample(self.wavs[path], anniversary.sound_loops(index))
         if self.is_loaded(index):
-            return raw_sample(self.entry(index))
+            return raw_sample(self.loaded[index])
         return no_sample()
 
     def sound_period(self, period: int32) -> int32:
@@ -300,20 +300,6 @@ class Resources:
         for e in self.entries:
             if e.kind <= RT_BITMAP or e.kind > 6:
                 e.state = STATE_NOT_NEEDED
-
-    def segment(self, which: int32) -> bytes:
-        """The current part's bytecode, palettes, cinematic polygons or
-        shared shapes (0-3)."""
-        if which == 0:
-            return self.bytecode
-        if which == 1:
-            return self.palettes
-        if which == 2:
-            return self.cinematic
-        return self.shapes
-
-    def entry(self, index: int32) -> bytes:
-        return self.loaded[index]
 
     def setup_part(self, part: int32) -> None:
         if part == self.current_part:

@@ -6,7 +6,7 @@ from tpy import Own, int32
 
 
 def _utf8(cp: int32) -> str:
-    # Not chr(): it truncates code points above 127 (BUGS.md#chr-above-127-truncates).
+    # Not chr(): TPy's chr() returns a one-byte char, so it raises above 127.
     if cp < 0x80:
         return bytes([cp]).decode()
     if cp < 0x800:

@@ -129,8 +129,8 @@ def find_tpy_lib(arg: str) -> str:
                 cwd="/")
     init = os.path.join(lib, "tpy", "__init__.py")
     if not lib or not os.path.exists(init) or "TPY_CPYTHON_FAST" not in open(init).read():
-        sys.exit("bench.py: no tpy package with fast mode (tpy-lang after 0.7.0.dev0's "
-                 "de3f644fa6); name its directory with --tpy-lib")
+        sys.exit("bench.py: no tpy package with fast mode (tpy-lang 0.7 or later); "
+                 "name its directory with --tpy-lib")
     return lib
 
 
